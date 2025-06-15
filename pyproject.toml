@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "songbird-ai"
+version = "0.1.0"
+description = "A terminal-first AI coding companion that runs on local LLMs"
+readme = "README.md"
+license = "MIT"
+authors = [
+    {name = "Songbird Team"},
+]
+keywords = ["ai", "coding", "llm", "terminal", "cli", "assistant"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11", 
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "appdirs>=1.4.4",
+    "ollama>=0.5.1",
+    "rich>=13.7.1",
+    "typer>=0.16.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "coverage[toml]>=7.9.1",
+    "httpx>=0.27.0",
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/user/songbird"
+Documentation = "https://github.com/user/songbird/blob/main/README.md"
+Repository = "https://github.com/user/songbird.git"
+Issues = "https://github.com/user/songbird/issues"
+
+[project.scripts]
+songbird = "songbird.cli:app"
+
+[tool.hatch.version]
+path = "songbird/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["songbird"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
