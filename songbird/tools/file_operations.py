@@ -153,6 +153,48 @@ async def file_edit(file_path: str, new_content: str, create_backup: bool = True
         }
 
 
+async def file_create(file_path: str, content: str) -> Dict[str, Any]:
+    """
+    Create a new file with the specified content.
+    
+    Args:
+        file_path: Path to the new file to create
+        content: Content to write to the file
+        
+    Returns:
+        Dictionary with operation result
+    """
+    try:
+        path = Path(file_path)
+        
+        # Check if file already exists
+        if path.exists():
+            return {
+                "success": False,
+                "error": f"File already exists: {file_path}. Use file_edit to modify existing files."
+            }
+        
+        # Ensure parent directory exists
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Write content to new file
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        return {
+            "success": True,
+            "file_path": str(path),
+            "message": f"Created new file: {path.name}",
+            "lines_written": len(content.splitlines())
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error creating file: {e}"
+        }
+
+
 async def apply_file_edit(file_path: str, new_content: str, create_backup: bool = True) -> Dict[str, Any]:
     """
     Actually apply the file edit after confirmation.
@@ -200,34 +242,31 @@ def _format_diff_preview(diff_lines: List[str]) -> str:
     if not diff_lines:
         return "No changes detected."
     
-    # Create Rich Text object for colored diff
-    diff_text = Text()
-    
+    # Simple string formatting for better compatibility
+    formatted_lines = []
     for line in diff_lines:
-        if line.startswith('+++') or line.startswith('---'):
-            diff_text.append(line + '\n', style="bold blue")
-        elif line.startswith('@@'):
-            diff_text.append(line + '\n', style="bold cyan")
-        elif line.startswith('+'):
-            diff_text.append(line + '\n', style="bold green")
-        elif line.startswith('-'):
-            diff_text.append(line + '\n', style="bold red")
-        else:
-            diff_text.append(line + '\n', style="dim")
+        formatted_lines.append(line)
     
-    # Use console to render to string
-    with console.capture() as capture:
-        console.print(diff_text, end="")
-    
-    return capture.get()
+    return '\n'.join(formatted_lines)
 
 
 def display_diff_preview(diff_preview: str, file_path: str):
     """Display a formatted diff preview with Rich."""
+    # Use Rich's Syntax for better diff display
+    syntax = Syntax(
+        diff_preview, 
+        "diff", 
+        theme="github-dark", 
+        line_numbers=False,
+        word_wrap=False,
+        background_color="default"
+    )
     panel = Panel(
-        diff_preview,
-        title=f"📝 Proposed changes to {file_path}",
+        syntax,
+        title=f"Proposed changes to {file_path}",
         title_align="left",
-        border_style="blue"
+        border_style="blue",
+        expand=True,
+        width=None  # Let it auto-size to content
     )
     console.print(panel)

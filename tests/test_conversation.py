@@ -20,6 +20,10 @@ class TestConversationOrchestrator:
             content="Hello! I can help you with your code.",
             model="test-model"
         )
+        provider.chat_with_messages.return_value = ChatResponse(
+            content="Hello! I can help you with your code.",
+            model="test-model"
+        )
         return provider
     
     @pytest.fixture
@@ -44,8 +48,8 @@ class TestConversationOrchestrator:
     @pytest.mark.asyncio
     async def test_chat_with_tool_calls(self, orchestrator, mock_provider):
         """Test chat that triggers tool calls."""
-        # Mock response with tool calls
-        mock_provider.chat.return_value = ChatResponse(
+        # Mock first response with tool calls
+        first_response = ChatResponse(
             content="I'll search for TODO items in your code.",
             model="test-model",
             tool_calls=[{
@@ -57,10 +61,18 @@ class TestConversationOrchestrator:
             }]
         )
         
+        # Mock second response after tool execution
+        second_response = ChatResponse(
+            content="I found 6 TODO items in your codebase. Here are the results...",
+            model="test-model"
+        )
+        
+        # Set up side_effect for multiple calls
+        mock_provider.chat_with_messages.side_effect = [first_response, second_response]
+        
         response = await orchestrator.chat("Find all TODO items")
         
-        assert "I'll search for TODO items" in response
-        assert "[Used tools: file_search]" in response
+        assert "I found 6 TODO items" in response
         
         # Check conversation history includes tool interactions
         history = orchestrator.get_conversation_history()

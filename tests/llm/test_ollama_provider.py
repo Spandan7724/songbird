@@ -55,3 +55,22 @@ class TestOllamaProvider:
         assert response.content
         # tool_calls might be None if the model doesn't choose to call tools
         assert response.tool_calls is None or isinstance(response.tool_calls, list)
+    
+    def test_chat_with_messages(self):
+        """Test that OllamaProvider.chat_with_messages() works with conversation history."""
+        provider = OllamaProvider(
+            base_url="http://127.0.0.1:11434", 
+            model="qwen2.5-coder:7b"
+        )
+        
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there! How can I help you?"},
+            {"role": "user", "content": "What's 2+2?"}
+        ]
+        
+        response = provider.chat_with_messages(messages)
+        
+        assert isinstance(response, ChatResponse)
+        assert response.content
+        assert "4" in response.content  # Should answer the math question

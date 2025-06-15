@@ -22,6 +22,24 @@
 
 ## Quick Start
 
+### Option 1: With Gemini (Recommended)
+
+```bash
+# Install Songbird
+pipx install songbird-ai
+
+# Get your free Gemini API key
+# Visit: https://aistudio.google.com/app/apikey
+
+# Set your API key
+export GOOGLE_API_KEY="your-api-key-here"
+
+# Start coding with AI
+songbird
+```
+
+### Option 2: With Local Ollama
+
 ```bash
 # Install Songbird
 pipx install songbird-ai
@@ -34,15 +52,16 @@ ollama serve
 ollama pull qwen2.5-coder:7b
 
 # Start coding with AI
-songbird chat
+songbird --provider ollama
 ```
 
 ## Features
 
-### **Local AI Power**
-- **Privacy-First**: Run AI models locally with Ollama - no data leaves your machine
-- **Offline Capable**: Work without internet connection once models are downloaded
-- **Multiple Models**: Support for coding-optimized models like Qwen2.5-Coder, CodeLlama, and more
+### **Flexible AI Options**
+- **Cloud AI**: Use Google's powerful Gemini models for best performance and latest features
+- **Local AI**: Run models locally with Ollama for privacy and offline use
+- **Multiple Models**: Support for Gemini 2.0 Flash, Qwen2.5-Coder, CodeLlama, and more
+- **Easy Switching**: Switch between providers with simple command flags
 
 ### **Developer Tools Integration**
 - **File Search**: Lightning-fast code search with ripgrep integration
@@ -140,8 +159,19 @@ ollama pull deepseek-coder:6.7b # DeepSeek Coder
 ### 4. Start Songbird
 
 ```bash
-# Launch interactive chat
-songbird chat
+# Launch interactive chat (uses Gemini if API key is set, otherwise Ollama)
+songbird
+
+# Use specific provider
+songbird --provider gemini
+songbird --provider ollama
+
+# Use specific model
+songbird --provider gemini --model gemini-2.0-flash-001
+songbird --provider ollama --model qwen2.5-coder:7b
+
+# Check available providers
+songbird --list-providers
 
 # Check version and commands
 songbird --help
@@ -151,8 +181,21 @@ songbird version
 ## Usage Examples
 
 ```bash
-# Basic chat session
-songbird chat
+# Basic chat session (auto-selects best provider)
+songbird
+
+# Use Gemini (powerful, cloud-based)
+songbird --provider gemini
+
+# Use Ollama (private, local)
+songbird --provider ollama
+
+# List available providers
+songbird --list-providers
+
+# Use specific models
+songbird --provider gemini --model gemini-2.0-flash-001
+songbird --provider ollama --model qwen2.5-coder:7b
 
 # Show available commands
 songbird --help
@@ -273,7 +316,26 @@ ollama list
 ollama pull qwen2.5-coder:7b
 
 # List available models
-songbird models list
+ollama list
+```
+</details>
+
+<details>
+<summary>Gemini API Issues</summary>
+
+```bash
+# Check if API key is set
+echo $GOOGLE_API_KEY
+
+# Get a free API key
+# Visit: https://aistudio.google.com/app/apikey
+
+# Set API key permanently
+echo 'export GOOGLE_API_KEY="your-key-here"' >> ~/.bashrc
+source ~/.bashrc
+
+# Test Gemini provider
+songbird --provider gemini
 ```
 </details>
 

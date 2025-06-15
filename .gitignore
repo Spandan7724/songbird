@@ -35,3 +35,5 @@ TODO.md
 songbird.egg-info/
 songbird/__pycache__/
 tests/__pycache__
+
+TESTING/

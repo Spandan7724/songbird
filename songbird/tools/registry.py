@@ -5,7 +5,8 @@ Provides JSON schema definitions for tools that LLMs can invoke.
 """
 from typing import Dict, Any, List
 from .file_search import file_search
-from .file_operations import file_read, file_edit
+from .file_operations import file_read, file_edit, file_create
+from .shell_exec import shell_exec
 
 
 # Tool schema definitions for LLMs
@@ -57,6 +58,27 @@ TOOL_SCHEMAS = {
             }
         }
     },
+    "file_create": {
+        "type": "function",
+        "function": {
+            "name": "file_create",
+            "description": "Create a new file with specified content. Always use this when the user asks to create, write, or make a new file. If file already exists, will return an error.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the new file to create"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Complete content for the new file"
+                    }
+                },
+                "required": ["file_path", "content"]
+            }
+        }
+    },
     "file_edit": {
         "type": "function",
         "function": {
@@ -82,6 +104,32 @@ TOOL_SCHEMAS = {
                 "required": ["file_path", "new_content"]
             }
         }
+    },
+    "shell_exec": {
+        "type": "function",
+        "function": {
+            "name": "shell_exec",
+            "description": "Execute shell commands safely with output capture. Useful for running tests, builds, git commands, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command to execute"
+                    },
+                    "working_dir": {
+                        "type": "string",
+                        "description": "Working directory for command execution (optional)"
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "Timeout in seconds (default: 30)",
+                        "default": 30.0
+                    }
+                },
+                "required": ["command"]
+            }
+        }
     }
 }
 
@@ -89,7 +137,9 @@ TOOL_SCHEMAS = {
 TOOL_FUNCTIONS = {
     "file_search": file_search,
     "file_read": file_read,
-    "file_edit": file_edit
+    "file_create": file_create,
+    "file_edit": file_edit,
+    "shell_exec": shell_exec
 }
 
 
