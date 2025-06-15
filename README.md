@@ -260,11 +260,11 @@ uv tool install ./dist/songbird_ai-*.whl
 
 Songbird follows a **test-driven, phase-based development** approach:
 
-- [x] **Phase 1**: LLM Provider Layer ✅
-- [ ] **Phase 2**: File Search (ripgrep integration)
-- [ ] **Phase 3**: Patch Generation & Apply
-- [ ] **Phase 4**: Shell Execution
-- [ ] **Phase 5**: Conversation Orchestrator
+- [x] **Phase 1**: LLM Provider Layer 
+- [x] **Phase 2**: File Search (ripgrep integration)
+- [x] **Phase 3**: Patch Generation & Apply
+- [x] **Phase 4**: Shell Execution
+- [x] **Phase 5**: Conversation Orchestrator
 - [ ] **Phase 6**: MCP Server Protocol
 - [ ] **Phase 7**: Session Memory
 - [ ] **Phase 8**: Model & Provider Management
