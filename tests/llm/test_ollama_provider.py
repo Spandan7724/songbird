@@ -32,3 +32,26 @@ class TestOllamaProvider:
         
         assert "not found" in str(exc_info.value)
         assert "ollama pull" in str(exc_info.value)
+    
+    def test_chat_with_tools(self):
+        """Test that OllamaProvider.chat() works with tools parameter."""
+        provider = OllamaProvider(
+            base_url="http://127.0.0.1:11434", 
+            model="qwen2.5-coder:7b"
+        )
+        
+        tools = [{
+            "type": "function",
+            "function": {
+                "name": "test_tool",
+                "description": "A test tool",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        }]
+        
+        response = provider.chat("hi", tools=tools)
+        
+        assert isinstance(response, ChatResponse)
+        assert response.content
+        # tool_calls might be None if the model doesn't choose to call tools
+        assert response.tool_calls is None or isinstance(response.tool_calls, list)

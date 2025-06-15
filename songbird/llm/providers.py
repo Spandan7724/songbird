@@ -1,6 +1,6 @@
 """LLM provider registry and base classes."""
 from abc import ABC, abstractmethod
-from typing import Dict, Type
+from typing import Dict, Type, List, Any, Optional
 import ollama
 
 from .types import ChatResponse
@@ -10,7 +10,7 @@ class BaseProvider(ABC):
     """Base class for all LLM providers."""
     
     @abstractmethod
-    def chat(self, message: str) -> ChatResponse:
+    def chat(self, message: str, tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """Send a chat message and return the response."""
         pass
 
@@ -23,18 +23,25 @@ class OllamaProvider(BaseProvider):
         self.model = model
         self.client = ollama.Client(host=base_url)
     
-    def chat(self, message: str) -> ChatResponse:
+    def chat(self, message: str, tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """Send a chat message to Ollama."""
         try:
-            response = self.client.chat(
-                model=self.model,
-                messages=[{"role": "user", "content": message}]
-            )
+            chat_args = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": message}]
+            }
+            
+            # Add tools if provided (Ollama supports function calling)
+            if tools:
+                chat_args["tools"] = tools
+            
+            response = self.client.chat(**chat_args)
             
             return ChatResponse(
                 content=response['message']['content'],
                 model=response.get('model'),
-                usage=response.get('usage')
+                usage=response.get('usage'),
+                tool_calls=response['message'].get('tool_calls')
             )
             
         except ollama.ResponseError as e:
