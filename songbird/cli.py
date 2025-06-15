@@ -65,7 +65,8 @@ def chat(provider: Optional[str] = None, model: Optional[str] = None) -> None:
     # Set default models based on provider
     default_models = {
         "gemini": "gemini-2.0-flash-001",
-        "ollama": "qwen2.5-coder:7b"
+        # "ollama": "qwen2.5-coder:7b"
+        "ollama": "devstral:latest"
     }
     model_name = model or default_models.get(provider_name, "qwen2.5-coder:7b")
     

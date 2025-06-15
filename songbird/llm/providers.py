@@ -2,12 +2,37 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Type, List, Any, Optional
 import os
+import logging
 import ollama
 
 try:
     from google import genai
     from google.genai import types as genai_types
     GEMINI_AVAILABLE = True
+    
+    # Comprehensive warning suppression for Gemini SDK
+    import warnings
+    import sys
+    
+    # Suppress specific warnings
+    warnings.filterwarnings("ignore", message=".*non-text parts.*")
+    warnings.filterwarnings("ignore", message=".*function_call.*")
+    
+    # Redirect stderr temporarily to suppress print statements
+    class SuppressWarnings:
+        def __enter__(self):
+            self._original_stderr = sys.stderr
+            sys.stderr = open(os.devnull, 'w')
+            return self
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            sys.stderr.close()
+            sys.stderr = self._original_stderr
+    
+    # Set logging levels
+    logging.getLogger('google.genai').setLevel(logging.CRITICAL)
+    logging.getLogger('google.genai.types').setLevel(logging.CRITICAL)
+    logging.getLogger().setLevel(logging.CRITICAL)
+    
 except ImportError:
     GEMINI_AVAILABLE = False
 
@@ -149,6 +174,8 @@ class GeminiProvider(BaseProvider):
         """Convert Gemini response to Songbird ChatResponse format."""
         content = response.text or ""
         
+        # Clean response processing (debug output removed)
+        
         # Convert function calls if present
         tool_calls = None
         if hasattr(response, 'function_calls') and response.function_calls:
@@ -161,6 +188,24 @@ class GeminiProvider(BaseProvider):
                         "arguments": func_call.args
                     }
                 })
+        else:
+            # Check if function calls are in candidates content parts (alternative location)
+            if hasattr(response, 'candidates') and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate.content, 'parts'):
+                    tool_calls = []
+                    for part in candidate.content.parts:
+                        if hasattr(part, 'function_call') and part.function_call:
+                            tool_calls.append({
+                                "id": getattr(part.function_call, 'id', ""),
+                                "function": {
+                                    "name": part.function_call.name,
+                                    "arguments": part.function_call.args
+                                }
+                            })
+                    
+                    if not tool_calls:
+                        tool_calls = None
         
         return ChatResponse(
             content=content,
@@ -226,11 +271,15 @@ class GeminiProvider(BaseProvider):
             
             config = genai_types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
             
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=gemini_contents,
-                config=config
-            )
+            # Suppress warnings during API call
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=gemini_contents,
+                    config=config
+                )
             
             return self._convert_gemini_response_to_songbird(response)
             

@@ -59,8 +59,7 @@ class ConversationOrchestrator:
                     function_name = tool_call["function"]["name"]
                     arguments = tool_call["function"]["arguments"]
                 else:
-                    # Unknown format
-                    print(f"DEBUG: Unknown tool call format: {tool_call}")
+                    # Unknown format, skip
                     continue
                 
                 # Handle both string and dict arguments
@@ -121,17 +120,48 @@ class ConversationOrchestrator:
                     "content": json.dumps(tool_result["result"])
                 })
             
-            # Get final response from LLM after tool execution (without tools to get natural response)
-            messages = self._build_messages_for_llm()
-            final_response = self.provider.chat_with_messages(messages, tools=None)
-            
-            # Add final response to history
-            self.conversation_history.append({
-                "role": "assistant",
-                "content": final_response.content
-            })
-            
-            return final_response.content
+            # Continue conversation with function results following official pattern
+            if hasattr(self.provider, 'chat_with_messages'):
+                messages = self._build_messages_with_function_results(tool_results)
+                final_response = self.provider.chat_with_messages(messages, tools=None)
+                
+                # Add final response to history
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": final_response.content
+                })
+                
+                return final_response.content
+            else:
+                # Fallback for providers that don't support chat_with_messages
+                if len(tool_results) == 1:
+                    result = tool_results[0]
+                    function_name = result["function_name"]
+                    success = result["result"].get("success", False)
+                    
+                    if success:
+                        if function_name == "file_create":
+                            file_path = result["result"].get("file_path", "unknown")
+                            content = f"✅ Successfully created file: {file_path}"
+                        elif function_name == "file_edit":
+                            file_path = result["result"].get("file_path", "unknown")
+                            content = f"✅ Successfully edited file: {file_path}"
+                        else:
+                            content = f"✅ Successfully executed {function_name}"
+                    else:
+                        error = result["result"].get("error", "Unknown error")
+                        content = f"❌ {function_name} failed: {error}"
+                else:
+                    successful = sum(1 for r in tool_results if r["result"].get("success", False))
+                    content = f"✅ Executed {successful}/{len(tool_results)} tools successfully"
+                
+                # Add final response to history
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": content
+                })
+                
+                return content
         else:
             # No tool calls, just return the response
             self.conversation_history.append({
@@ -163,38 +193,80 @@ class ConversationOrchestrator:
                 }
                 messages.append(clean_msg)
             elif msg["role"] == "tool":
-                # Convert tool results to user messages asking for interpretation
-                import json
-                try:
-                    tool_result = json.loads(msg['content'])
-                    if tool_result.get('result', {}).get('success'):
-                        # Successful tool execution
-                        stdout = tool_result.get('result', {}).get('stdout', '')
-                        stderr = tool_result.get('result', {}).get('stderr', '')
-                        if stdout:
-                            tool_msg = {
-                                "role": "user",
-                                "content": f"The command executed successfully with output:\n{stdout}"
-                            }
-                        else:
-                            tool_msg = {
-                                "role": "user", 
-                                "content": "The command executed successfully with no output."
-                            }
+                # Skip tool messages in conversation for now - let the final response handle acknowledgment
+                continue
+        return messages
+    
+    def _build_messages_with_function_results(self, tool_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Build messages including function call results following official Google GenAI pattern.
+        
+        IMPORTANT: We provide clear instructions to the LLM to not repeat the code content,
+        since it was already shown in the tool execution output.
+        """
+        messages = []
+        
+        # Add all conversation history up to the latest assistant message with tool calls
+        for msg in self.conversation_history:
+            if msg["role"] in ["user", "assistant"]:
+                clean_msg = {
+                    "role": msg["role"],
+                    "content": msg["content"]
+                }
+                # Include tool_calls if present (for the assistant message that triggered tools)
+                if "tool_calls" in msg:
+                    clean_msg["tool_calls"] = msg["tool_calls"]
+                messages.append(clean_msg)
+        
+        # Add tool results as system/user messages describing what happened
+        tool_summary = []
+        for tool_result in tool_results:
+            function_name = tool_result["function_name"]
+            result = tool_result["result"]
+            
+            if result.get("success", False):
+                if function_name == "file_create":
+                    file_path = result.get("file_path", "unknown file")
+                    # Check if content was already shown
+                    if result.get("content_preview_shown", False):
+                        content = f"Successfully created file: {file_path}\n(Content already displayed above - no need to show it again)"
                     else:
-                        # Failed tool execution
-                        error = tool_result.get('result', {}).get('error', 'Unknown error')
-                        tool_msg = {
-                            "role": "user",
-                            "content": f"The command failed with error: {error}"
-                        }
-                except json.JSONDecodeError:
-                    # Fallback for non-JSON results
-                    tool_msg = {
-                        "role": "user", 
-                        "content": f"Tool result: {msg['content']}"
-                    }
-                messages.append(tool_msg)
+                        content = f"Successfully created file: {file_path}"
+                elif function_name == "file_edit":
+                    file_path = result.get("file_path", "unknown file")
+                    content = f"Successfully edited file: {file_path}\n(Diff already displayed above - no need to show the code again)"
+                elif function_name == "shell_exec":
+                    stdout = result.get("stdout", "")
+                    if stdout:
+                        content = f"Command executed successfully with output:\n{stdout}"
+                    else:
+                        content = "Command executed successfully"
+                elif function_name == "file_search":
+                    matches = result.get("matches", [])
+                    content = f"Search completed, found {len(matches)} matches"
+                elif function_name == "file_read":
+                    lines_returned = result.get("lines_returned", 0)
+                    content = f"File read successfully, {lines_returned} lines"
+                else:
+                    content = f"Tool {function_name} executed successfully"
+            else:
+                error = result.get("error", "Unknown error")
+                content = f"Tool {function_name} failed: {error}"
+            
+            tool_summary.append(content)
+        
+        # Create a single message with all tool results and instructions
+        combined_message = "Tool execution results:\n" + "\n".join(tool_summary)
+        
+        # Add instruction to not repeat code
+        if any("file_create" in r["function_name"] or "file_edit" in r["function_name"] for r in tool_results):
+            combined_message += "\n\nIMPORTANT: The file content/diff has already been displayed to the user during tool execution. Please do NOT repeat or show the code again. Just acknowledge the successful creation/edit."
+        
+        messages.append({
+            "role": "user",
+            "content": combined_message
+        })
+        
         return messages
     
     async def _handle_file_edit(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -229,7 +301,8 @@ class ConversationOrchestrator:
                     return {
                         "success": True,
                         "message": f"{apply_result['message']}",
-                        "file_path": apply_result["file_path"]
+                        "file_path": apply_result["file_path"],
+                        "diff_displayed": True  # Flag that diff was shown
                     }
                 else:
                     return apply_result

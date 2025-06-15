@@ -37,3 +37,5 @@ songbird/__pycache__/
 tests/__pycache__
 
 TESTING/
+repomix-output.xml
+.claude/

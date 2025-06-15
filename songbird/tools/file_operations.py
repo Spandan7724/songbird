@@ -15,6 +15,79 @@ from rich.text import Text
 console = Console()
 
 
+def _get_lexer_from_filename(filename: str) -> str:
+    """Get appropriate lexer based on file extension."""
+    ext = Path(filename).suffix.lower()
+    lexer_map = {
+        '.py': 'python',
+        '.js': 'javascript',
+        '.ts': 'typescript',
+        '.jsx': 'jsx',
+        '.tsx': 'tsx',
+        '.java': 'java',
+        '.c': 'c',
+        '.cpp': 'cpp',
+        '.cs': 'csharp',
+        '.go': 'go',
+        '.rs': 'rust',
+        '.php': 'php',
+        '.rb': 'ruby',
+        '.swift': 'swift',
+        '.kt': 'kotlin',
+        '.scala': 'scala',
+        '.r': 'r',
+        '.m': 'matlab',
+        '.sql': 'sql',
+        '.sh': 'bash',
+        '.ps1': 'powershell',
+        '.yaml': 'yaml',
+        '.yml': 'yaml',
+        '.json': 'json',
+        '.xml': 'xml',
+        '.html': 'html',
+        '.css': 'css',
+        '.scss': 'scss',
+        '.sass': 'sass',
+        '.less': 'less',
+        '.md': 'markdown',
+        '.rst': 'rst',
+        '.tex': 'latex',
+        '.vim': 'vim',
+        '.lua': 'lua',
+        '.dart': 'dart',
+        '.elm': 'elm',
+        '.clj': 'clojure',
+        '.ex': 'elixir',
+        '.erl': 'erlang',
+        '.fs': 'fsharp',
+        '.hs': 'haskell',
+        '.jl': 'julia',
+        '.nim': 'nim',
+        '.ml': 'ocaml',
+        '.pl': 'perl',
+        '.raku': 'perl6',
+        '.purs': 'purescript',
+        '.rkt': 'racket',
+        '.re': 'reason',
+        '.v': 'verilog',
+        '.vhd': 'vhdl',
+        '.zig': 'zig',
+        '.toml': 'toml',
+        '.ini': 'ini',
+        '.cfg': 'ini',
+        '.conf': 'apache',
+        '.bat': 'batch',
+        '.dockerfile': 'docker',
+        '.makefile': 'makefile',
+        '.cmake': 'cmake',
+        '.gradle': 'groovy',
+        '.proto': 'protobuf',
+        '.diff': 'diff',
+        '.patch': 'diff',
+    }
+    return lexer_map.get(ext, 'text')
+
+
 async def file_read(file_path: str, lines: Optional[int] = None, start_line: Optional[int] = None) -> Dict[str, Any]:
     """
     Read file contents for LLM analysis.
@@ -174,6 +247,24 @@ async def file_create(file_path: str, content: str) -> Dict[str, Any]:
                 "error": f"File already exists: {file_path}. Use file_edit to modify existing files."
             }
         
+        # Show preview of what will be created
+        console.print(f"\n[bold green]Creating new file:[/bold green] {path}")
+        syntax = Syntax(
+            content,
+            lexer=_get_lexer_from_filename(str(path)),
+            theme="github-dark",
+            line_numbers=True,
+            word_wrap=False
+        )
+        panel = Panel(
+            syntax,
+            title=f"New file: {path.name}",
+            title_align="left",
+            border_style="green",
+            expand=True
+        )
+        console.print(panel)
+        
         # Ensure parent directory exists
         path.parent.mkdir(parents=True, exist_ok=True)
         
@@ -185,7 +276,8 @@ async def file_create(file_path: str, content: str) -> Dict[str, Any]:
             "success": True,
             "file_path": str(path),
             "message": f"Created new file: {path.name}",
-            "lines_written": len(content.splitlines())
+            "lines_written": len(content.splitlines()),
+            "content_preview_shown": True
         }
         
     except Exception as e:
