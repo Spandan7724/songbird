@@ -3,11 +3,11 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
 
-from .models import Session, Message, SessionStub
+from .models import Session, Message
 
 
 class SessionManager:
@@ -111,40 +111,49 @@ class SessionManager:
         
         return None
     
-
     def get_latest_session(self) -> Optional[Session]:
-        """Return fully-hydrated most-recent session (or None)."""
-        stubs = self.list_sessions()
-        if not stubs:
+        """Get the most recently updated session."""
+        sessions = self.list_sessions()
+        if not sessions:
             return None
-        latest = max(stubs, key=lambda s: s.updated_at)
-        return self.load_session(latest.id)
         
-
-    def list_sessions(self) -> List[SessionStub]:
-        """Metadata list for this project (fast)."""
-        stubs: list[SessionStub] = []
-
+        # Sort by updated_at descending
+        sessions.sort(key=lambda s: s.updated_at, reverse=True)
+        return sessions[0]
+    
+    def list_sessions(self) -> List[Session]:
+        """List all sessions for the current project."""
+        sessions = []
+        
         if not self.storage_dir.exists():
-            return stubs
-
-        for fpath in self.storage_dir.glob("*.jsonl"):
-            with fpath.open("r", encoding="utf-8") as fh:
-                meta = json.loads(fh.readline() or "{}")
-                if meta.get("type") != "metadata":
+            return sessions
+        
+        for session_file in self.storage_dir.glob("*.jsonl"):
+            # Read just the metadata line
+            with open(session_file, "r", encoding="utf-8") as f:
+                first_line = f.readline()
+                if not first_line:
                     continue
-
-                # Count remaining lines once (fast for ≤20 sessions)
-                n_msgs = sum(1 for _ in fh)
-                stubs.append(
-                    SessionStub(
-                        id=meta["id"],
-                        updated_at=datetime.fromisoformat(meta["updated_at"]),
-                        n_messages=n_msgs,
-                        summary=meta.get("summary", ""),
+                
+                data = json.loads(first_line)
+                if data.get("type") == "metadata":
+                    # Count messages by counting remaining lines
+                    message_count = sum(1 for _ in f)
+                    
+                    session = Session(
+                        id=data["id"],
+                        created_at=datetime.fromisoformat(data["created_at"]),
+                        updated_at=datetime.fromisoformat(data["updated_at"]),
+                        summary=data.get("summary", ""),
+                        project_path=data.get("project_path", "")
                     )
-                )
-        return stubs
+                    
+                    # Add dummy messages for count (we don't load all messages for listing)
+                    session.messages = [None] * message_count  # type: ignore
+                    
+                    sessions.append(session)
+        
+        return sessions
     
     def delete_session(self, session_id: str) -> bool:
         """Delete a session."""

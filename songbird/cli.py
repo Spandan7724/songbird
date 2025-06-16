@@ -2,22 +2,25 @@
 from __future__ import annotations
 import asyncio
 import os
-from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
+from datetime import datetime
+import json
 import typer
-from pathlib import Path
 from rich.console import Console
 from rich.prompt import Prompt
 from rich.table import Table
-from rich.syntax import Syntax
 from rich.panel import Panel
+from rich.syntax import Syntax
 from . import __version__
 from .llm.providers import get_provider, list_available_providers, get_default_provider
-from .conversation import ConversationOrchestrator
+from .conversation import ConversationOrchestrator, interactive_menu
 from .memory.manager import SessionManager
-from .memory.models import Session, SessionStub, Message
-app = typer.Typer(add_completion=False, rich_markup_mode="rich", help="Songbird - Terminal-first AI coding companion", no_args_is_help=False)
+from .memory.models import Session
+
+app = typer.Typer(add_completion=False, rich_markup_mode="rich",
+                  help="Songbird - Terminal-first AI coding companion", no_args_is_help=False)
 console = Console()
+
 
 def show_banner():
     """Display the Songbird ASCII banner in blue."""
@@ -32,257 +35,410 @@ def show_banner():
     console.print(banner, style="bold blue")
 
 
-def _render_msg(msg: "Message") -> None:
-    if msg.role == "user":
-        console.print(f"[bold cyan]You:[/bold cyan] {msg.content}")
-    elif msg.role == "assistant":
-        console.print(
-            f"[medium_spring_green]Songbird:[/medium_spring_green] {msg.content}"
-        )
-    elif msg.role == "tool":
-        content = msg.content
-        if content.startswith("{") and content.endswith("}"):
-            # JSON result wrapper
-            console.print(
-                Panel.fit(content, title="tool result", border_style="dim")
-            )
-        elif content.lstrip().startswith("---"):
-            # Diff text saved as JSON string
-            syntax = Syntax(content, "diff", theme="ansi_dark", word_wrap=True)
-            console.print(
-                Panel(syntax, title="diff preview", border_style="blue")
-            )
-        else:
-            console.print(
-                Panel.fit(content, title="tool output", border_style="dim")
-            )
-
-    # DISPLAY (captured diff previews, shell output, etc.) ------------------ #
-    elif msg.role == "display":
-        txt = msg.content
-        if txt.lstrip().startswith("---"):
-            syntax = Syntax(txt, "diff", theme="ansi_dark", word_wrap=True)
-            console.print(
-                Panel(syntax, title="diff preview", border_style="blue")
-            )
-        else:
-            console.print(Panel.fit(txt, border_style="dim", title="output"))
-    else:
-        console.print(f"[dim]{msg.role}: {msg.content}[/dim]")
-
-
-def _replay_history(session: Session) -> None:
-    """Print every stored message except system prompts."""
-    console.rule("[dim]Previous conversation[/dim]")
-    for msg in session.messages:
-        if msg.role == "system":
-            continue
-        _render_msg(msg)
-    console.rule("[dim]--- end of history ---[/dim]")
-
-
 def format_time_ago(dt: datetime) -> str:
-    """Return “3h ago”, “just now”, or YYYY-MM-DD if > 7 days."""
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
+    """Format a datetime as a human-readable time ago string."""
+    now = datetime.now()
     diff = now - dt
 
     if diff.days > 7:
         return dt.strftime("%Y-%m-%d")
-    if diff.days:
+    elif diff.days > 0:
         return f"{diff.days}d ago"
-    hours = diff.seconds // 3600
-    if hours:
-        return f"{hours}h ago"
-    minutes = diff.seconds // 60
-    if minutes:
-        return f"{minutes}m ago"
-    return "just now"
+    elif diff.seconds > 3600:
+        return f"{diff.seconds // 3600}h ago"
+    elif diff.seconds > 60:
+        return f"{diff.seconds // 60}m ago"
+    else:
+        return "just now"
 
 
-def display_session_selector(sessions: List[Session]) -> Optional[Session]:
-    """Render a Rich table, allow numeric pick, return selected Session."""
+def display_session_selector(sessions: list[Session]) -> Optional[Session]:
+    """Display an interactive session selector and return the selected session."""
     if not sessions:
         console.print("No previous sessions found.", style="yellow")
         return None
 
-    sessions = sorted(sessions, key=lambda s: s.updated_at, reverse=True)
+    # Sort sessions by updated_at descending
+    sessions.sort(key=lambda s: s.updated_at, reverse=True)
 
-    table = Table(title="Previous Sessions", show_lines=True)
-    table.add_column("#", justify="right", style="bold cyan")
-    table.add_column("Updated", style="green")
-    table.add_column("Msgs", justify="right")
-    table.add_column("Summary")
+    # Prepare options for interactive menu
+    options = []
+    for session in sessions:
+        created = format_time_ago(session.created_at)
+        modified = format_time_ago(session.updated_at)
+        msg_count = len(session.messages)
+        summary = session.summary or "Empty session"
 
-    for idx, s in enumerate(sessions, 1):
-        updated = format_time_ago(s.updated_at)
-        count = s.n_messages
-        table.add_row(str(idx), updated, str(count), s.summary or "no summary")
+        # Format: "Modified: 2h ago | Created: 3d ago | 15 messages | Working on auth feature"
+        option = f"Modified: {modified} | Created: {created} | {msg_count} msgs | {summary}"
+        options.append(option)
 
-    console.print(table)
-    choice = Prompt.ask("\nSelect session (blank to cancel)", default="")
+    options.append("Start new session")
 
-    if not choice.strip():
+    # Use interactive menu
+    selected_idx = interactive_menu(
+        "Select a session to resume:",
+        options,
+        default_index=0
+    )
+
+    if selected_idx == len(sessions):  # "Start new session" selected
         return None
-    try:
-        sel = int(choice) - 1
-        if 0 <= sel < len(sessions):
-            return sessions[sel]
-    except ValueError:
-        pass
 
-    console.print("Invalid selection.", style="red")
-    return None
+    return sessions[selected_idx]
+
+
+def replay_conversation(session: Session):
+    """Replay the conversation history to show it as the user saw it."""
+    # Import here to avoid circular dependency
+    from .tools.file_operations import display_diff_preview
+    from rich.panel import Panel
+    from rich.syntax import Syntax
+
+    # Group messages with their tool calls and results
+    i = 0
+    while i < len(session.messages):
+        msg = session.messages[i]
+
+        if msg.role == "system":
+            # Skip system messages in replay
+            i += 1
+            continue
+
+        elif msg.role == "user":
+            console.print(f"\n[bold cyan]You[/bold cyan]: {msg.content}")
+            i += 1
+
+        elif msg.role == "assistant":
+            # Check if this is a tool-calling message
+            if msg.tool_calls:
+                # Show thinking message
+                console.print(
+                    f"\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
+
+                # Track tool index for matching with tool results
+                tool_result_idx = i + 1
+
+                # Process each tool call
+                for tool_call in msg.tool_calls:
+                    function_name = tool_call["function"]["name"]
+                    arguments = tool_call["function"]["arguments"]
+
+                    # Parse arguments if they're a string
+                    if isinstance(arguments, str):
+                        arguments = json.loads(arguments)
+
+                    # Get the corresponding tool result
+                    tool_result = None
+                    if tool_result_idx < len(session.messages) and session.messages[tool_result_idx].role == "tool":
+                        tool_result = json.loads(
+                            session.messages[tool_result_idx].content)
+                        tool_result_idx += 1
+
+                    # Display tool execution based on type
+                    if function_name == "file_create" and tool_result:
+                        file_path = tool_result.get(
+                            "file_path", arguments.get("file_path", "unknown"))
+                        content = arguments.get("content", "")
+
+                        console.print(f"\nCreating new file: {file_path}")
+                        # Determine language from file extension
+                        ext = file_path.split(
+                            '.')[-1] if '.' in file_path else 'text'
+                        # Create numbered lines manually to match original formatting
+                        lines = content.split('\n')
+                        numbered_lines = []
+                        for idx, line in enumerate(lines, 1):
+                            numbered_lines.append(f"  {idx:2d} {line}")
+                        formatted_content = '\n'.join(numbered_lines)
+                        console.print(
+                            f"╭─ New file: {file_path} {'─' * (console.width - len(file_path) - 15)}╮")
+                        console.print(formatted_content)
+                        console.print(f"╰{'─' * (console.width - 2)}╯")
+
+                    elif function_name == "file_edit" and tool_result:
+                        file_path = tool_result.get(
+                            "file_path", arguments.get("file_path", "unknown"))
+                        if "diff_preview" in tool_result:
+                            display_diff_preview(
+                                tool_result["diff_preview"], file_path)
+                            console.print("\nApply these changes?\n")
+                            console.print("[green]▶ Yes[/green]")
+                            console.print("  No")
+                            console.print("\nSelected: Yes")
+
+                    elif function_name == "shell_exec" and tool_result:
+                        command = tool_result.get(
+                            "command", arguments.get("command", ""))
+                        cwd = tool_result.get("working_directory", "")
+
+                        console.print(f"\nExecuting command: {command}")
+                        if cwd:
+                            console.print(f"Working directory: {cwd}")
+
+                        # Match the exact shell panel style
+                        console.print(
+                            f"\n╭─ Shell {'─' * (console.width - 10)}╮")
+                        console.print(
+                            f"│ > {command}{' ' * (console.width - len(command) - 5)}│")
+                        console.print(f"╰{'─' * (console.width - 2)}╯")
+
+                        if "stdout" in tool_result and tool_result["stdout"]:
+                            console.print("\nOutput:")
+                            console.print("─" * console.width)
+                            console.print(tool_result["stdout"].rstrip())
+                            console.print("─" * console.width)
+
+                        if "stderr" in tool_result and tool_result["stderr"]:
+                            console.print("\nError output:", style="red")
+                            console.print(
+                                tool_result["stderr"].rstrip(), style="red")
+
+                        exit_code = tool_result.get("exit_code", 0)
+                        if exit_code == 0:
+                            console.print(
+                                f"✓ Command completed successfully (exit code: {exit_code})", style="green")
+                        else:
+                            console.print(
+                                f"✗ Command failed (exit code: {exit_code})", style="red")
+
+                    elif function_name == "file_search" and tool_result:
+                        pattern = arguments.get("pattern", "")
+                        console.print(f"\nSearching for: {pattern}")
+
+                        # Display search results if available
+                        if "matches" in tool_result and tool_result["matches"]:
+                            from rich.table import Table
+                            table = Table(
+                                title=f"Search results for '{pattern}'")
+                            table.add_column("File", style="cyan")
+                            table.add_column("Line", style="yellow")
+                            table.add_column("Content", style="white")
+
+                            # Show first 10
+                            for match in tool_result["matches"][:10]:
+                                table.add_row(
+                                    match.get("file", ""),
+                                    str(match.get("line_number", "")),
+                                    match.get("line_content", "").strip()
+                                )
+                            console.print(table)
+
+                    elif function_name == "file_read" and tool_result:
+                        file_path = arguments.get("file_path", "")
+                        console.print(f"\nReading file: {file_path}")
+
+                        if "content" in tool_result:
+                            content = tool_result["content"]
+                            # Show first 20 lines
+                            lines = content.split('\n')[:20]
+                            preview = '\n'.join(lines)
+                            if len(content.split('\n')) > 20:
+                                preview += "\n... (truncated)"
+
+                            ext = file_path.split(
+                                '.')[-1] if '.' in file_path else 'text'
+                            syntax = Syntax(
+                                preview, ext, theme="monokai", line_numbers=True)
+                            console.print(
+                                Panel(syntax, title=f"File: {file_path}", border_style="blue"))
+
+                # Skip to after all tool results
+                i = tool_result_idx
+
+                # If there's content after tool calls, show it
+                if msg.content:
+                    console.print(
+                        f"\n[medium_spring_green]Songbird[/medium_spring_green]: {msg.content}")
+
+            else:
+                # Regular assistant message
+                if msg.content:
+                    console.print(
+                        f"\n[medium_spring_green]Songbird[/medium_spring_green]: {msg.content}")
+                i += 1
+
+        elif msg.role == "tool":
+            # Tool results are handled inline above, skip
+            i += 1
+            continue
+        else:
+            i += 1
 
 
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
     provider: Optional[str] = typer.Option(
-        None, "--provider", "-p", help="LLM provider (gemini, ollama)"
-    ),
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model"),
-    continue_: bool = typer.Option(
-        False, "--continue", "-c", help="Continue latest session in project"
-    ),
-    resume: bool = typer.Option(
-        False, "--resume", "-r", help="Choose from past sessions in project"
-    ),
+        None, "--provider", "-p", help="LLM provider to use (gemini, ollama)"),
+    model: Optional[str] = typer.Option(
+        None, "--model", "-m", help="Model to use"),
     list_providers: bool = typer.Option(
-        False, "--list-providers", help="List available providers and exit"
-    ),
-) -> None:
-    """Run **songbird** to chat.  Use -c/-r for session memory."""
+        False, "--list-providers", help="List available providers and exit"),
+    continue_session: bool = typer.Option(
+        False, "--continue", "-c", help="Continue the latest session"),
+    resume_session: bool = typer.Option(
+        False, "--resume", "-r", help="Resume a previous session from a list")
+):
+    """
+    Songbird - Terminal-first AI coding companion
+    
+    Run 'songbird' to start an interactive chat session with AI and tools.
+    Run 'songbird --continue' to continue your latest session.
+    Run 'songbird --resume' to select and resume a previous session.
+    Run 'songbird version' to show version information.
+    """
     if list_providers:
         available = list_available_providers()
         default = get_default_provider()
         console.print("Available providers:", style="bold")
         for p in available:
-            console.print(f"  {p}{' (default)' if p == default else ''}")
+            status = " (default)" if p == default else ""
+            console.print(f"  {p}{status}")
         return
 
     if ctx.invoked_subcommand is None:
-        chat(provider, model, continue_, resume)
+        # No subcommand provided, start chat session
+        chat(provider=provider, model=model,
+             continue_session=continue_session, resume_session=resume_session)
 
 
 @app.command(hidden=True)
 def chat(
-    provider: Optional[str],
-    model: Optional[str],
-    continue_: bool,
-    resume: bool,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    continue_session: bool = False,
+    resume_session: bool = False
 ) -> None:
+    """Start an interactive Songbird session with AI and tools."""
     show_banner()
-    console.print(
-        "\nWelcome to Songbird - Your AI coding companion!", style="bold green")
+
+    # Initialize session manager
+    session_manager = SessionManager(os.getcwd())
+    session = None
+
+    # Handle session continuation/resumption
+    if continue_session:
+        session = session_manager.get_latest_session()
+        if session:
+            console.print(
+                f"\n[bold green]Continuing session from {format_time_ago(session.updated_at)}[/bold green]")
+            console.print(f"Summary: {session.summary}", style="dim")
+
+            # Replay the conversation
+            replay_conversation(session)
+            console.print("\n[dim]--- Session resumed ---[/dim]\n")
+        else:
+            console.print(
+                "\n[yellow]No previous session found. Starting new session.[/yellow]")
+
+    elif resume_session:
+        sessions = session_manager.list_sessions()
+        if sessions:
+            selected_session = display_session_selector(sessions)
+            if selected_session:
+                session = session_manager.load_session(selected_session.id)
+                if session:
+                    console.print(
+                        f"\n[bold green]Resuming session from {format_time_ago(session.updated_at)}[/bold green]")
+                    console.print(f"Summary: {session.summary}", style="dim")
+
+                    # Replay the conversation
+                    replay_conversation(session)
+                    console.print("\n[dim]--- Session resumed ---[/dim]\n")
+            else:
+                # User selected "Start new session"
+                console.print(
+                    "\n[bold green]Starting new session[/bold green]")
+        else:
+            console.print(
+                "\n[yellow]No previous sessions found. Starting new session.[/yellow]")
+
+    # Create new session if not continuing/resuming
+    if not session:
+        session = session_manager.create_session()
+        console.print(
+            "\nWelcome to Songbird - Your AI coding companion!", style="bold green")
+
     console.print(
         "Available tools: file_search, file_read, file_create, file_edit, shell_exec", style="dim")
     console.print(
         "I can search, read, edit files with diffs, and run shell commands. Type 'exit' to quit.\n", style="dim")
 
-
-
-
-    # 1.  Resolve / create session ------------------------------------- #
-    sess_mgr = SessionManager(os.getcwd())
-
-    def hydrate(stub: SessionStub) -> Session:
-        full = sess_mgr.load_session(stub.id)
-        if full is None:
-            console.print(
-                f"[yellow]Warning:[/] session {stub.id} could not be loaded; "
-                "starting a new one."
-            )
-            return sess_mgr.create_session()
-        return full
-
-    if continue_ and resume:
-        console.print("Choose either --continue or --resume.", style="red")
-        raise typer.Exit(1)
-
-    if continue_:
-        session = sess_mgr.get_latest_session() or sess_mgr.create_session()
-        console.print("[dim]Continuing latest session.[/dim]")
-
-    elif resume:
-        stub = display_session_selector(sess_mgr.list_sessions())
-        if stub is None:
-            raise typer.Exit()
-        session = hydrate(stub)
-
-    else:
-        session = sess_mgr.create_session()
-
-    # ------------------------------------------------------------------ #
-    # 2.  Replay previous conversation (if any)
-    # ------------------------------------------------------------------ #
-    if session.messages:                
-        _replay_history(session)
-
-
-
-    # 2.  Provider & orchestrator -------------------------------------- #
+    # Determine provider and model
     provider_name = provider or get_default_provider()
+
+    # Set default models based on provider
     default_models = {
-        "gemini": "gemini-2.0-flash-001",
-        "ollama": "devstral:latest",
+        "gemini": "gemini-2.0-flash-exp",
+        "ollama": "qwen2.5-coder:7b"
     }
     model_name = model or default_models.get(provider_name, "qwen2.5-coder:7b")
-    console.print(
-        f"Using provider: {provider_name}, model: {model_name}", style="dim"
-    )
 
+    console.print(
+        f"Using provider: {provider_name}, model: {model_name}", style="dim")
+
+    # Initialize LLM provider and conversation orchestrator
     try:
-        provider_cls = get_provider(provider_name)
+        provider_class = get_provider(provider_name)
+
         if provider_name == "gemini":
-            provider_inst = provider_cls(model=model_name)
+            provider_instance = provider_class(model=model_name)
         elif provider_name == "ollama":
-            provider_inst = provider_cls(
-                base_url="http://127.0.0.1:11434", model=model_name
+            provider_instance = provider_class(
+                base_url="http://127.0.0.1:11434",
+                model=model_name
             )
         else:
-            provider_inst = provider_cls(model=model_name)
+            provider_instance = provider_class(model=model_name)
 
+        # Create orchestrator with session
         orchestrator = ConversationOrchestrator(
-            provider_inst, Path.cwd(), session=session
-        )
-        asyncio.run(_chat_loop(orchestrator, sess_mgr))
-    except Exception as exc:
-        console.print(f"Startup error: {exc}", style="red")
+            provider_instance, os.getcwd(), session=session)
+
+        # Start chat loop
+        asyncio.run(_chat_loop(orchestrator))
+
+    except Exception as e:
+        console.print(f"Error starting Songbird: {e}", style="red")
         if provider_name == "gemini":
-            console.print("Set GOOGLE_API_KEY env var.", style="dim")
+            console.print(
+                "Make sure you have set GOOGLE_API_KEY environment variable", style="dim")
+            console.print(
+                "Get your API key from: https://aistudio.google.com/app/apikey", style="dim")
         elif provider_name == "ollama":
-            console.print("Ensure `ollama serve` is running.", style="dim")
-            console.print(f"And the model is available: ollama pull {model_name}", style="dim")
+            console.print(
+                "Make sure Ollama is running: ollama serve", style="dim")
+            console.print(
+                f"And the model is available: ollama pull {model_name}", style="dim")
 
 
-async def _chat_loop(
-    orchestrator: ConversationOrchestrator, sess_mgr: SessionManager
-) -> None:
+async def _chat_loop(orchestrator: ConversationOrchestrator):
+    """Run the interactive chat loop."""
     while True:
         try:
+            # Get user input
             user_input = Prompt.ask("\n[bold cyan]You[/bold cyan]")
-            if user_input.lower() in {"exit", "quit", "bye"}:
+
+            if user_input.lower() in ["exit", "quit", "bye"]:
                 console.print("\nGoodbye!", style="bold blue")
                 break
 
+            # Get AI response
             console.print(
-                "\n[medium_spring_green]Songbird[/medium_spring_green] (thinking…)",
-                style="dim",
-            )
-            reply = await orchestrator.chat(user_input)
-            console.print(f"\n{reply}")
+                "\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
+            response = await orchestrator.chat(user_input)
+
+            # Clear the "thinking..." line and display response
+            console.print(
+                f"\r[medium_spring_green]Songbird[/medium_spring_green]: {response}")
 
         except KeyboardInterrupt:
             console.print("\n\nGoodbye!", style="bold blue")
             break
-        except Exception as exc:
-            console.print(f"\nError: {exc}", style="red")
-        finally:
-            # Persist after every turn
-            if orchestrator.session:
-                sess_mgr.save_session(orchestrator.session)
+        except Exception as e:
+            console.print(f"\nError: {e}", style="red")
+
 
 @app.command()
 def version() -> None:
@@ -290,6 +446,7 @@ def version() -> None:
     show_banner()
     console.print(f"\nSongbird v{__version__}", style="bold cyan")
     console.print("Terminal-first AI coding companion", style="dim")
+
 
 if __name__ == "__main__":
     # Running file directly: python -m songbird.cli

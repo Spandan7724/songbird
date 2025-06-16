@@ -15,7 +15,7 @@ from .tools.registry import get_tool_schemas
 from .tools.file_operations import display_diff_preview, apply_file_edit
 from .memory.models import Session, Message
 from .memory.manager import SessionManager
-from songbird.config import get_config
+
 
 def getch():
     """Get a single character from stdin, cross-platform."""
@@ -35,8 +35,9 @@ def getch():
         # Check if stdin is a TTY
         if not sys.stdin.isatty():
             return ''  # Fallback for non-TTY environments
-        
-        import tty, termios
+
+        import tty
+        import termios
         try:
             fd = sys.stdin.fileno()
             old = termios.tcgetattr(fd)
@@ -63,13 +64,13 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
     """
     console = Console()
     current = default_index
-    
+
     # Display prompt
     console.print(f"\n{prompt}", style="bold white")
-    
+
     # Initial render - create space for menu
     print('\n' * len(options))
-    
+
     def render():
         # Move cursor up to start of menu
         sys.stdout.write(f'\x1b[{len(options)}F')
@@ -81,30 +82,33 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
                 # Normal option
                 sys.stdout.write(f"  {opt}\n")
         sys.stdout.flush()
-    
+
     render()
-    
+
     try:
         while True:
             ch = getch()
-            
+
             # If getch() fails (non-TTY environment), auto-select default
             if ch == '':
-                console.print(f"\nAuto-selected: {options[current]} (non-interactive environment)", style="yellow")
+                console.print(
+                    f"\nAuto-selected: {options[current]} (non-interactive environment)", style="yellow")
                 break
-            
+
             if ch == '\x1b':  # Escape sequence (arrow keys) - Unix/Linux
                 try:
                     seq = getch() + getch()
                     if seq == '[A' and current > 0:  # Up arrow
                         current -= 1
-                    elif seq == '[B' and current < len(options) - 1:  # Down arrow
+                    # Down arrow
+                    elif seq == '[B' and current < len(options) - 1:
                         current += 1
                 except:
                     pass  # Ignore malformed escape sequences
             elif ch == '\x1b[A' and current > 0:  # Up (Windows-mapped)
                 current -= 1
-            elif ch == '\x1b[B' and current < len(options) - 1:  # Down (Windows-mapped)
+            # Down (Windows-mapped)
+            elif ch == '\x1b[B' and current < len(options) - 1:
                 current += 1
 
             elif ch in ('\r', '\n'):  # Enter
@@ -120,13 +124,13 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
                 if 0 <= idx < len(options):
                     current = idx
                     break
-            
+
             render()
-            
+
     except KeyboardInterrupt:
         console.print("\n\nCancelled by user", style="red")
         raise
-    
+
     # Show final selection
     console.print(f"\nSelected: {options[current]}", style="bold cyan")
     return current
@@ -134,14 +138,14 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
 
 class ConversationOrchestrator:
     """Orchestrates conversations between user, LLM, and tools."""
-    
+
     def __init__(self, provider: BaseProvider, working_directory: str = ".", session: Optional[Session] = None):
         self.provider = provider
         self.tool_executor = ToolExecutor(working_directory)
         self.conversation_history: List[Dict[str, Any]] = []
         self.session = session
         self.session_manager = SessionManager(working_directory)
-        
+
         # Add system prompt to guide the LLM
         self.system_prompt = """You are Songbird, an AI coding assistant with access to powerful tools for interacting with the file system and terminal.
 
@@ -167,7 +171,7 @@ When users ask you to:
 ALWAYS use the appropriate tool when asked to perform file operations or terminal commands. Never say you cannot do something that these tools enable.
 
 When editing files, go straight to using file_edit - the tool will show the diff automatically."""
-        
+
         # Initialize conversation history
         if self.session and self.session.messages:
             # Load existing conversation history from session
@@ -178,18 +182,18 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 "role": "system",
                 "content": self.system_prompt
             })
-            
+
             # Add system message to session if it's new
             if self.session:
                 self.session.add_message(Message(
                     role="system",
                     content=self.system_prompt
                 ))
-    
+
     def _load_history_from_session(self):
         """Load conversation history from session messages."""
         self.conversation_history = []
-        
+
         for msg in self.session.messages:
             hist_msg = {
                 "role": msg.role,
@@ -199,9 +203,9 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 hist_msg["tool_calls"] = msg.tool_calls
             if msg.tool_call_id:
                 hist_msg["tool_call_id"] = msg.tool_call_id
-            
+
             self.conversation_history.append(hist_msg)
-    
+
     async def chat(self, message: str) -> str:
         """
         Send a message and handle any tool calls with multi-turn conversation.
@@ -217,23 +221,23 @@ When editing files, go straight to using file_edit - the tool will show the diff
             "role": "user",
             "content": message
         })
-        
+
         # Add to session if we have one
         if self.session:
             user_msg = Message(role="user", content=message)
             self.session.add_message(user_msg)
             # Save after each user message
             self.session_manager.save_session(self.session)
-        
+
         # Get available tools
         tools = self.tool_executor.get_available_tools()
-        
+
         # Convert our conversation history to the format expected by the LLM
         messages = self._build_messages_for_llm()
-        
+
         # Get LLM response
         response = self.provider.chat_with_messages(messages, tools=tools)
-        
+
         # Handle tool calls if any
         if response.tool_calls:
             # Execute tool calls
@@ -251,21 +255,22 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 else:
                     # Unknown format, skip
                     continue
-                
+
                 # Handle both string and dict arguments
                 if isinstance(arguments, str):
                     arguments = json.loads(arguments)
-                
+
                 # Special handling for file_edit - show diff and confirm
                 if function_name == "file_edit":
                     result = await self._handle_file_edit(arguments)
                 else:
                     result = await self.tool_executor.execute_tool(function_name, arguments)
-                
+
                 # Ensure result has the expected structure
                 if not isinstance(result, dict):
-                    result = {"success": False, "error": "Invalid result format"}
-                
+                    result = {"success": False,
+                              "error": "Invalid result format"}
+
                 # Get tool call ID
                 if hasattr(tool_call, 'function'):
                     tool_call_id = getattr(tool_call, 'id', "")
@@ -273,14 +278,14 @@ When editing files, go straight to using file_edit - the tool will show the diff
                     tool_call_id = tool_call.get("id", "")
                 else:
                     tool_call_id = ""
-                
+
                 tool_results.append({
                     "tool_call_id": tool_call_id,
                     "function_name": function_name,
                     "result": result
                 })
-            
-            # Add assistant message with tool calls to history  
+
+            # Add assistant message with tool calls to history
             # Convert tool calls to serializable format
             serializable_tool_calls = []
             for tool_call in response.tool_calls:
@@ -299,13 +304,13 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 else:
                     # Unknown format, try to convert
                     serializable_tool_calls.append(str(tool_call))
-            
+
             self.conversation_history.append({
-                "role": "assistant", 
+                "role": "assistant",
                 "content": response.content or "",
                 "tool_calls": serializable_tool_calls
             })
-            
+
             # Add to session
             if self.session:
                 assistant_msg = Message(
@@ -314,80 +319,92 @@ When editing files, go straight to using file_edit - the tool will show the diff
                     tool_calls=serializable_tool_calls
                 )
                 self.session.add_message(assistant_msg)
-            
+
             # Add tool results to history
             for tool_result in tool_results:
                 # The result from execute_tool is wrapped in {"success": bool, "result": actual_result}
                 wrapped_result = tool_result["result"]
-                actual_result = wrapped_result.get("result") if wrapped_result.get("success") else wrapped_result
-                
+                actual_result = wrapped_result.get(
+                    "result") if wrapped_result.get("success") else wrapped_result
+
                 self.conversation_history.append({
                     "role": "tool",
                     "tool_call_id": tool_result["tool_call_id"],
                     # Store the actual result, not the wrapper
-                    "content": json.dumps(actual_result, default=str)
+                    "content": json.dumps(actual_result)
                 })
-                
+
                 # Add to session
                 if self.session:
                     tool_msg = Message(
                         role="tool",
-                        content=json.dumps(actual_result, default=str),
+                        content=json.dumps(actual_result),
                         tool_call_id=tool_result["tool_call_id"]
                     )
                     self.session.add_message(tool_msg)
-            
+
             # Continue conversation with function results following official pattern
             if hasattr(self.provider, 'chat_with_messages'):
                 try:
-                    messages = self._build_messages_with_function_results(tool_results)
-                    final_response = self.provider.chat_with_messages(messages, tools=None)
-                    
+                    messages = self._build_messages_with_function_results(
+                        tool_results)
+                    final_response = self.provider.chat_with_messages(
+                        messages, tools=None)
+
                     # Add final response to history
                     self.conversation_history.append({
                         "role": "assistant",
                         "content": final_response.content
                     })
-                    
+
                     # Add to session
                     if self.session:
-                        final_msg = Message(role="assistant", content=final_response.content)
+                        final_msg = Message(
+                            role="assistant", content=final_response.content)
                         self.session.add_message(final_msg)
                         # Update summary
                         self.session.summary = self.session.generate_summary()
                         self.session_manager.save_session(self.session)
-                    
+
                     return final_response.content
                 except Exception as e:
                     # If there's an error, provide a simple status message
-                    Console().print(f"[dim]Debug: Error in final response: {e}[/dim]")
-                    
+                    Console().print(
+                        f"[dim]Debug: Error in final response: {e}[/dim]")
+
                     # Provide a simple status based on tool results
                     status_messages = []
                     for result in tool_results:
                         func_name = result["function_name"]
                         success = result["result"].get("success", False)
-                        
+
                         if success:
                             if func_name == "file_edit":
-                                status_messages.append("✓ File edited successfully")
+                                status_messages.append(
+                                    "✓ File edited successfully")
                             elif func_name == "file_create":
-                                status_messages.append("✓ File created successfully")
+                                status_messages.append(
+                                    "✓ File created successfully")
                             else:
-                                status_messages.append(f"✓ {func_name} completed")
+                                status_messages.append(
+                                    f"✓ {func_name} completed")
                         else:
-                            error = result["result"].get("error", "Unknown error")
-                            status_messages.append(f"✗ {func_name} failed: {error}")
-                    
-                    status_content = "\n".join(status_messages) if status_messages else "Operation completed"
-                    
+                            error = result["result"].get(
+                                "error", "Unknown error")
+                            status_messages.append(
+                                f"✗ {func_name} failed: {error}")
+
+                    status_content = "\n".join(
+                        status_messages) if status_messages else "Operation completed"
+
                     # Add to session
                     if self.session:
-                        status_msg = Message(role="assistant", content=status_content)
+                        status_msg = Message(
+                            role="assistant", content=status_content)
                         self.session.add_message(status_msg)
                         self.session.summary = self.session.generate_summary()
                         self.session_manager.save_session(self.session)
-                    
+
                     return status_content
             else:
                 # Fallback for providers that don't support chat_with_messages
@@ -395,13 +412,15 @@ When editing files, go straight to using file_edit - the tool will show the diff
                     result = tool_results[0]
                     function_name = result["function_name"]
                     success = result["result"].get("success", False)
-                    
+
                     if success:
                         if function_name == "file_create":
-                            file_path = result["result"].get("file_path", "unknown")
+                            file_path = result["result"].get(
+                                "file_path", "unknown")
                             content = f"✅ Successfully created file: {file_path}"
                         elif function_name == "file_edit":
-                            file_path = result["result"].get("file_path", "unknown")
+                            file_path = result["result"].get(
+                                "file_path", "unknown")
                             content = f"✅ Successfully edited file: {file_path}"
                         else:
                             content = f"✅ Successfully executed {function_name}"
@@ -409,22 +428,23 @@ When editing files, go straight to using file_edit - the tool will show the diff
                         error = result["result"].get("error", "Unknown error")
                         content = f"❌ {function_name} failed: {error}"
                 else:
-                    successful = sum(1 for r in tool_results if r["result"].get("success", False))
+                    successful = sum(
+                        1 for r in tool_results if r["result"].get("success", False))
                     content = f"✅ Executed {successful}/{len(tool_results)} tools successfully"
-                
+
                 # Add final response to history
                 self.conversation_history.append({
                     "role": "assistant",
                     "content": content
                 })
-                
+
                 # Add to session
                 if self.session:
                     final_msg = Message(role="assistant", content=content)
                     self.session.add_message(final_msg)
                     self.session.summary = self.session.generate_summary()
                     self.session_manager.save_session(self.session)
-                
+
                 return content
         else:
             # No tool calls, just return the response
@@ -432,46 +452,58 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 "role": "assistant",
                 "content": response.content
             })
-            
+
             # Add to session
             if self.session:
-                assistant_msg = Message(role="assistant", content=response.content)
+                assistant_msg = Message(
+                    role="assistant", content=response.content)
                 self.session.add_message(assistant_msg)
                 self.session.summary = self.session.generate_summary()
                 self.session_manager.save_session(self.session)
-            
+
             return response.content
-    
+
     def get_conversation_history(self) -> List[Dict[str, Any]]:
         """Get the conversation history."""
         return self.conversation_history.copy()
-    
+
     def clear_history(self):
         """Clear the conversation history."""
         self.conversation_history.clear()
-    
+
     def _build_messages_for_llm(self) -> List[Dict[str, Any]]:
         """
         Convert conversation history to format expected by LLM.
-        Filters out tool-specific fields that the LLM doesn't need.
+        Includes all messages to maintain context.
         """
         messages = []
         for msg in self.conversation_history:
             if msg["role"] == "system":
-                # Always include system messages
                 messages.append(msg)
-            elif msg["role"] in ["user", "assistant"]:
-                # For assistant messages, only include content, not tool_calls
+            elif msg["role"] == "user":
+                messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+            elif msg["role"] == "assistant":
+                # Include assistant messages with their content
                 clean_msg = {
                     "role": msg["role"],
                     "content": msg["content"]
                 }
+                # Include tool_calls if present
+                if "tool_calls" in msg and msg["tool_calls"]:
+                    clean_msg["tool_calls"] = msg["tool_calls"]
                 messages.append(clean_msg)
             elif msg["role"] == "tool":
-                # Skip tool messages in conversation for now - let the final response handle acknowledgment
-                continue
+                # Include tool results in the conversation
+                messages.append({
+                    "role": "tool",
+                    "content": msg["content"],
+                    "tool_call_id": msg.get("tool_call_id", "")
+                })
         return messages
-    
+
     def _build_messages_with_function_results(self, tool_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Build messages including function call results following official Google GenAI pattern.
@@ -480,13 +512,13 @@ When editing files, go straight to using file_edit - the tool will show the diff
         since it was already shown in the tool execution output.
         """
         messages = []
-        
+
         # Add system prompt first
         messages.append({
             "role": "system",
             "content": self.system_prompt
         })
-        
+
         # Add all conversation history up to the latest assistant message with tool calls
         for msg in self.conversation_history:
             if msg["role"] == "system":
@@ -500,17 +532,17 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 if "tool_calls" in msg:
                     clean_msg["tool_calls"] = msg["tool_calls"]
                 messages.append(clean_msg)
-        
+
         # Add tool results as system/user messages describing what happened
         tool_summary = []
         for tool_result in tool_results:
             function_name = tool_result["function_name"]
             # The result from execute_tool is {"success": bool, "result": actual_result}
             wrapper_result = tool_result["result"]
-            
+
             if wrapper_result.get("success", False):
                 actual_result = wrapper_result["result"]
-                
+
                 if function_name == "file_create":
                     file_path = actual_result.get("file_path", "unknown file")
                     # Check if content was already shown
@@ -525,26 +557,20 @@ When editing files, go straight to using file_edit - the tool will show the diff
                     else:
                         content = f"Successfully edited file: {file_path}"
                 elif function_name == "shell_exec":
-                    # ------------------------------------------------------ #
-                    # Build the assistant-facing summary ('content' string)
-                    # ------------------------------------------------------ #
+                    # Check if output was displayed live
+                    # Default to True for new shell_exec
                     if actual_result.get("output_displayed", True):
-                        # Output was already streamed live
+                        # Output was already shown, just provide context
                         exit_code = actual_result.get("exit_code", 0)
                         command = actual_result.get(
                             "command", "unknown command")
+
                         if exit_code == 0:
-                            content = (
-                                f"The command '{command}' executed successfully "
-                                "and the output was displayed above."
-                            )
+                            content = f"The command '{command}' executed successfully and the output was displayed above."
                         else:
-                            content = (
-                                f"The command '{command}' failed with exit code "
-                                f"{exit_code}. See the live output above."
-                            )
+                            content = f"The command '{command}' failed with exit code {exit_code}. See the output above for details."
                     else:
-                        # Fallback – output captured but not streamed
+                        # Output wasn't displayed (shouldn't happen with current implementation)
                         stdout = actual_result.get("stdout", "").strip()
                         stderr = actual_result.get("stderr", "").strip()
                         exit_code = actual_result.get("exit_code", 0)
@@ -552,49 +578,27 @@ When editing files, go straight to using file_edit - the tool will show the diff
                             "command", "unknown command")
 
                         content = f"Executed command: {command}\nExit code: {exit_code}"
+
                         if stdout:
                             content += f"\n\nOutput:\n{stdout}"
                         if stderr:
                             content += f"\n\nError output:\n{stderr}"
                         if not stdout and not stderr:
                             content += "\n\n(No output produced)"
-                    from songbird.config import get_config
-                    # {"max_display_chars": … , "max_shell_lines": …}
-                    cfg = get_config()
-                    lines = (
-                        actual_result.get("stdout", "").splitlines()
-                        + actual_result.get("stderr", "").splitlines()
-                    )
 
-                    if lines:  # only log if there was any output
-                        display_lines = lines[: cfg["max_shell_lines"]]
-                        block = "\n".join(display_lines)
-                        if len(lines) > cfg["max_shell_lines"]:
-                            block += "\n… (truncated)"
-                        # Make sure we don't exceed max chars
-                        if len(block) > cfg["max_display_chars"]:
-                            block = block[: cfg["max_display_chars"]
-                                          ] + "\n… (truncated)"
-
-                        if self.session:
-                            self.session.add_message(
-                                Message(role="display", content=block)
-                            )
-
-                        
                 elif function_name == "file_search":
                     total_matches = actual_result.get("total_matches", 0)
                     search_type = actual_result.get("search_type", "text")
                     pattern = actual_result.get("pattern", "")
-                    
+
                     if total_matches > 0:
                         content = f"Found {total_matches} {search_type} matches for '{pattern}'"
-                        
+
                         # The search tool already displayed the results in a nice table,
                         # so just provide summary information
                         if actual_result.get("truncated"):
                             content += f" (showing first {len(actual_result.get('matches', []))} results)"
-                        
+
                         # Add file summary if many matches
                         matches = actual_result.get("matches", [])
                         if matches:
@@ -613,7 +617,8 @@ When editing files, go straight to using file_edit - the tool will show the diff
                     content = f"File read successfully, {lines_returned} lines"
                     if file_content:
                         # Include a preview of the content
-                        preview = file_content[:500] + "..." if len(file_content) > 500 else file_content
+                        preview = file_content[:500] + \
+                            "..." if len(file_content) > 500 else file_content
                         content += f"\n\nContent:\n{preview}"
                 else:
                     content = f"Tool {function_name} executed successfully"
@@ -621,40 +626,44 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 # Tool execution failed
                 error = wrapper_result.get("error", "Unknown error")
                 content = f"Tool {function_name} failed: {error}"
-            
+
             tool_summary.append(content)
-        
+
         # Create a single message with all tool results
-        combined_message = "Tool execution results:\n\n" + "\n\n---\n\n".join(tool_summary)
-        
+        combined_message = "Tool execution results:\n\n" + \
+            "\n\n---\n\n".join(tool_summary)
+
         # Add specific instructions based on what tools were used
         instructions = []
-        
+
         if any("shell_exec" in r["function_name"] for r in tool_results):
-            instructions.append("The shell command output has already been displayed to the user above. Please provide helpful context or summary, but do NOT repeat the raw output.")
-        
+            instructions.append(
+                "The shell command output has already been displayed to the user above. Please provide helpful context or summary, but do NOT repeat the raw output.")
+
         if any("file_create" in r["function_name"] or "file_edit" in r["function_name"] for r in tool_results):
-            instructions.append("The file content/diff has already been displayed to the user. Do NOT repeat or show the code again.")
-        
+            instructions.append(
+                "The file content/diff has already been displayed to the user. Do NOT repeat or show the code again.")
+
         if instructions:
-            combined_message += "\n\nIMPORTANT INSTRUCTIONS:\n" + "\n".join(instructions)
-        
+            combined_message += "\n\nIMPORTANT INSTRUCTIONS:\n" + \
+                "\n".join(instructions)
+
         messages.append({
             "role": "user",
             "content": combined_message
         })
-        
+
         return messages
-    
+
     async def _handle_file_edit(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Handle file edit with diff preview and confirmation."""
         try:
             # First, prepare the edit to show diff preview
             result = await self.tool_executor.execute_tool("file_edit", arguments)
-            
+
             if not result.get("success"):
                 return result
-            
+
             edit_result = result["result"]
             if not edit_result.get("changes_made"):
                 return {
@@ -664,21 +673,10 @@ When editing files, go straight to using file_edit - the tool will show the diff
                         "message": "No changes needed - file content is already as requested"
                     }
                 }
-            
-            # Display the diff preview
-            # Display the diff preview
-            diff_txt = edit_result["diff_preview"]
-            display_diff_preview(diff_txt, edit_result["file_path"])
 
-            # ---------- log the diff for replay (with truncation) ----------
-            limit = get_config()["max_display_chars"]
-            if len(diff_txt) > limit:
-                diff_txt = diff_txt[:limit] + "\n… (truncated)"
-
-            if self.session:
-                self.session.add_message(
-                    Message(role="display", content=diff_txt)
-                )
+            # Display the diff preview
+            display_diff_preview(
+                edit_result["diff_preview"], edit_result["file_path"])
 
             # Ask for confirmation with interactive menu
             if os.getenv("SONGBIRD_AUTO_APPLY") == "y":
@@ -687,19 +685,19 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 selected_index = await asyncio.to_thread(
                     interactive_menu,
                     "Apply these changes?",
-                    ["Yes", "No"],         
-                    default_index=0        
+                    ["Yes", "No"],
+                    default_index=0
                 )
                 user_confirmed = (selected_index == 0)
-            
+
             if user_confirmed:
                 # Apply the edit
                 apply_result = await apply_file_edit(
                     arguments["file_path"],
-                    arguments["new_content"], 
+                    arguments["new_content"],
                     arguments.get("create_backup", True)
                 )
-                
+
                 if apply_result["success"]:
                     return {
                         "success": True,
@@ -723,7 +721,7 @@ When editing files, go straight to using file_edit - the tool will show the diff
                         "message": "Changes cancelled by user"
                     }
                 }
-                
+
         except Exception as e:
             return {
                 "success": False,

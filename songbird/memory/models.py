@@ -99,14 +99,3 @@ class Session:
             summary += "..."
             
         return summary
-
-# --- lightweight row used in selectors ---------------------------------------
-
-
-@dataclass
-class SessionStub:
-    """Metadata-only view returned by SessionManager.list_sessions()."""
-    id: str
-    updated_at: datetime
-    n_messages: int
-    summary: str
