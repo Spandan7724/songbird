@@ -240,53 +240,63 @@ class GeminiProvider(BaseProvider):
             raise ConnectionError(f"Failed to connect to Gemini: {e}")
     
     def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
-        """Send a conversation with multiple messages to Gemini."""
-        try:
-            # Convert messages to Gemini format
-            gemini_contents = []
-            for msg in messages:
-                role = msg["role"]
-                content = msg["content"]
+            """Send a conversation with multiple messages to Gemini."""
+            try:
+                # Convert messages to Gemini format
+                gemini_contents = []
                 
-                if role == "user":
-                    gemini_contents.append(genai_types.Content(
-                        role="user",
-                        parts=[genai_types.Part.from_text(text=content)]
-                    ))
-                elif role == "assistant":
-                    gemini_contents.append(genai_types.Content(
-                        role="model",  # Gemini uses "model" instead of "assistant"
-                        parts=[genai_types.Part.from_text(text=content)]
-                    ))
-                # Skip tool messages for now - handle them differently if needed
-            
-            config_kwargs = {}
-            
-            # Add tools if provided
-            if tools:
-                gemini_tools = self._convert_tools_to_gemini_format(tools)
-                config_kwargs["tools"] = gemini_tools
-                # Disable automatic function calling to handle manually like Ollama
-                config_kwargs["automatic_function_calling"] = genai_types.AutomaticFunctionCallingConfig(disable=True)
-            
-            config = genai_types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
-            
-            # Suppress warnings during API call
-            import warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                response = self.client.models.generate_content(
-                    model=self.model,
-                    contents=gemini_contents,
-                    config=config
-                )
-            
-            return self._convert_gemini_response_to_songbird(response)
-            
-        except Exception as e:
-            raise ConnectionError(f"Failed to connect to Gemini: {e}")
-
-
+                # Combine system messages with the first user message (Gemini doesn't have separate system role)
+                system_content = ""
+                
+                for msg in messages:
+                    role = msg["role"]
+                    content = msg["content"]
+                    
+                    if role == "system":
+                        # Accumulate system messages
+                        system_content += content + "\n\n"
+                    elif role == "user":
+                        # If we have system content, prepend it to the first user message
+                        if system_content and not gemini_contents:
+                            content = system_content + content
+                            system_content = ""  # Clear after using
+                        
+                        gemini_contents.append(genai_types.Content(
+                            role="user",
+                            parts=[genai_types.Part.from_text(text=content)]
+                        ))
+                    elif role == "assistant":
+                        gemini_contents.append(genai_types.Content(
+                            role="model",  # Gemini uses "model" instead of "assistant"
+                            parts=[genai_types.Part.from_text(text=content)]
+                        ))
+                    # Skip tool messages for now - handle them differently if needed
+                
+                config_kwargs = {}
+                
+                # Add tools if provided
+                if tools:
+                    gemini_tools = self._convert_tools_to_gemini_format(tools)
+                    config_kwargs["tools"] = gemini_tools
+                    # Disable automatic function calling to handle manually like Ollama
+                    config_kwargs["automatic_function_calling"] = genai_types.AutomaticFunctionCallingConfig(disable=True)
+                
+                config = genai_types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
+                
+                # Suppress warnings during API call
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    response = self.client.models.generate_content(
+                        model=self.model,
+                        contents=gemini_contents,
+                        config=config
+                    )
+                
+                return self._convert_gemini_response_to_songbird(response)
+                
+            except Exception as e:
+                raise ConnectionError(f"Failed to connect to Gemini: {e}")
 # Provider registry
 _providers: Dict[str, Type[BaseProvider]] = {
     "ollama": OllamaProvider,

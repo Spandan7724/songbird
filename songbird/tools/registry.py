@@ -15,18 +15,33 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "file_search",
-            "description": "Search for text patterns in files using ripgrep. Returns structured results with file paths, line numbers, and matched content.",
+            "description": "Search for files, text patterns, functions, classes, or variables. Can find: filenames (e.g., 'test.py'), functions (e.g., 'calculate_total'), classes, text in files, or any code pattern. Automatically detects what you're looking for.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "pattern": {
                         "type": "string",
-                        "description": "Text pattern to search for (supports regex)"
+                        "description": "What to search for - can be filename, function name, class name, or any text/code pattern"
                     },
                     "directory": {
                         "type": "string", 
                         "description": "Directory path to search in (defaults to current working directory)",
                         "default": "."
+                    },
+                    "search_type": {
+                        "type": "string",
+                        "description": "Type of search: 'auto' (default), 'filename', 'text', 'function', 'class', 'variable'",
+                        "enum": ["auto", "filename", "text", "function", "class", "variable"],
+                        "default": "auto"
+                    },
+                    "file_pattern": {
+                        "type": "string",
+                        "description": "Optional glob pattern to filter files (e.g., '*.py' for Python files only)"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default: 50)",
+                        "default": 50
                     }
                 },
                 "required": ["pattern"]
@@ -37,7 +52,7 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "file_read",
-            "description": "Read file contents for analysis. Supports reading specific line ranges.",
+            "description": "Read file contents for analysis. Supports reading specific line ranges. Use this when you need to examine the contents of a specific file.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -83,7 +98,7 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "file_edit",
-            "description": "Edit a file with diff preview. Shows changes with + (additions) and - (deletions) before applying.",
+            "description": "Edit an existing file with diff preview. Shows changes with + (additions) and - (deletions) before applying. Use this to modify existing files.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -109,13 +124,13 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "shell_exec",
-            "description": "Execute shell commands safely with output capture. Useful for running tests, builds, git commands, etc.",
+            "description": "Execute ANY shell/terminal command. Use this for: listing files (ls, dir), running Python scripts, git commands, installing packages (pip, npm), checking system info, navigating directories (pwd, cd), and ANY other terminal command. This is your primary tool for interacting with the system.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "Shell command to execute"
+                        "description": "Any shell command to execute (e.g., 'ls -la', 'dir', 'python script.py', 'git status', 'pip install package')"
                     },
                     "working_dir": {
                         "type": "string",

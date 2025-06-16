@@ -18,6 +18,40 @@ class ConversationOrchestrator:
         self.provider = provider
         self.tool_executor = ToolExecutor(working_directory)
         self.conversation_history: List[Dict[str, Any]] = []
+        
+        # Add system prompt to guide the LLM
+        self.system_prompt = """You are Songbird, an AI coding assistant with access to powerful tools for interacting with the file system and terminal.
+
+IMPORTANT: You have access to the following tools:
+1. shell_exec - Execute ANY terminal/shell command (ls, dir, pwd, cd, python, git, pip, npm, etc.)
+2. file_create - Create new files with content
+3. file_edit - Edit existing files (shows diff before applying)
+4. file_read - Read file contents
+5. file_search - POWERFUL search tool that can find:
+   - Files by name (e.g., "find test.py" or "find all Python files")
+   - Functions by name (e.g., "find the calculate_total function")
+   - Classes by name (e.g., "find the UserModel class")
+   - Any text or code pattern in files
+   - Variables and their definitions
+   - The tool automatically detects what you're searching for!
+
+When users ask you to:
+- Find a file → Use file_search with the filename
+- Find a function/class → Use file_search with the name
+- Search for code → Use file_search with the pattern
+- List files/folders → Use shell_exec with 'ls' or 'dir'
+- Run Python scripts → Use shell_exec
+- Work with a specific function → First use file_search to find it, then file_read or file_edit
+
+ALWAYS use the appropriate tool when asked to perform file operations or terminal commands. Never say you cannot do something that these tools enable.
+
+When users mention a file or function but don't provide the full path, use file_search to locate it first."""
+        
+        # Initialize conversation with system prompt
+        self.conversation_history.append({
+            "role": "system",
+            "content": self.system_prompt
+        })
     
     async def chat(self, message: str) -> str:
         """
@@ -114,10 +148,14 @@ class ConversationOrchestrator:
             
             # Add tool results to history
             for tool_result in tool_results:
+                # The result from execute_tool is wrapped in {"success": bool, "result": actual_result}
+                wrapped_result = tool_result["result"]
+                actual_result = wrapped_result.get("result") if wrapped_result.get("success") else wrapped_result
+                
                 self.conversation_history.append({
                     "role": "tool",
                     "tool_call_id": tool_result["tool_call_id"],
-                    "content": json.dumps(tool_result["result"])
+                    "content": json.dumps(actual_result)  # Store the actual result, not the wrapper
                 })
             
             # Continue conversation with function results following official pattern
@@ -185,7 +223,10 @@ class ConversationOrchestrator:
         """
         messages = []
         for msg in self.conversation_history:
-            if msg["role"] in ["user", "assistant"]:
+            if msg["role"] == "system":
+                # Always include system messages
+                messages.append(msg)
+            elif msg["role"] in ["user", "assistant"]:
                 # For assistant messages, only include content, not tool_calls
                 clean_msg = {
                     "role": msg["role"],
@@ -206,9 +247,17 @@ class ConversationOrchestrator:
         """
         messages = []
         
+        # Add system prompt first
+        messages.append({
+            "role": "system",
+            "content": self.system_prompt
+        })
+        
         # Add all conversation history up to the latest assistant message with tool calls
         for msg in self.conversation_history:
-            if msg["role"] in ["user", "assistant"]:
+            if msg["role"] == "system":
+                continue  # Already added above
+            elif msg["role"] in ["user", "assistant"]:
                 clean_msg = {
                     "role": msg["role"],
                     "content": msg["content"]
@@ -222,45 +271,105 @@ class ConversationOrchestrator:
         tool_summary = []
         for tool_result in tool_results:
             function_name = tool_result["function_name"]
-            result = tool_result["result"]
+            # The result from execute_tool is {"success": bool, "result": actual_result}
+            wrapper_result = tool_result["result"]
             
-            if result.get("success", False):
+            if wrapper_result.get("success", False):
+                actual_result = wrapper_result["result"]
+                
                 if function_name == "file_create":
-                    file_path = result.get("file_path", "unknown file")
+                    file_path = actual_result.get("file_path", "unknown file")
                     # Check if content was already shown
-                    if result.get("content_preview_shown", False):
+                    if actual_result.get("content_preview_shown", False):
                         content = f"Successfully created file: {file_path}\n(Content already displayed above - no need to show it again)"
                     else:
                         content = f"Successfully created file: {file_path}"
                 elif function_name == "file_edit":
-                    file_path = result.get("file_path", "unknown file")
+                    file_path = actual_result.get("file_path", "unknown file")
                     content = f"Successfully edited file: {file_path}\n(Diff already displayed above - no need to show the code again)"
                 elif function_name == "shell_exec":
-                    stdout = result.get("stdout", "")
-                    if stdout:
-                        content = f"Command executed successfully with output:\n{stdout}"
+                    # Check if output was displayed live
+                    if actual_result.get("output_displayed", True):  # Default to True for new shell_exec
+                        # Output was already shown, just provide context
+                        exit_code = actual_result.get("exit_code", 0)
+                        command = actual_result.get("command", "unknown command")
+                        
+                        if exit_code == 0:
+                            content = f"The command '{command}' executed successfully and the output was displayed above."
+                        else:
+                            content = f"The command '{command}' failed with exit code {exit_code}. See the output above for details."
                     else:
-                        content = "Command executed successfully"
+                        # Output wasn't displayed (shouldn't happen with current implementation)
+                        stdout = actual_result.get("stdout", "").strip()
+                        stderr = actual_result.get("stderr", "").strip()
+                        exit_code = actual_result.get("exit_code", 0)
+                        command = actual_result.get("command", "unknown command")
+                        
+                        content = f"Executed command: {command}\nExit code: {exit_code}"
+                        
+                        if stdout:
+                            content += f"\n\nOutput:\n{stdout}"
+                        if stderr:
+                            content += f"\n\nError output:\n{stderr}"
+                        if not stdout and not stderr:
+                            content += "\n\n(No output produced)"
+                        
                 elif function_name == "file_search":
-                    matches = result.get("matches", [])
-                    content = f"Search completed, found {len(matches)} matches"
+                    total_matches = actual_result.get("total_matches", 0)
+                    search_type = actual_result.get("search_type", "text")
+                    pattern = actual_result.get("pattern", "")
+                    
+                    if total_matches > 0:
+                        content = f"Found {total_matches} {search_type} matches for '{pattern}'"
+                        
+                        # The search tool already displayed the results in a nice table,
+                        # so just provide summary information
+                        if actual_result.get("truncated"):
+                            content += f" (showing first {len(actual_result.get('matches', []))} results)"
+                        
+                        # Add file summary if many matches
+                        matches = actual_result.get("matches", [])
+                        if matches:
+                            files = list(set(m["file"] for m in matches))
+                            if len(files) == 1:
+                                content += f"\n\nAll matches are in: {files[0]}"
+                            elif len(files) <= 3:
+                                content += f"\n\nMatches found in: {', '.join(files)}"
+                            else:
+                                content += f"\n\nMatches found across {len(files)} files"
+                    else:
+                        content = f"No matches found for '{pattern}' ({search_type} search)"
                 elif function_name == "file_read":
-                    lines_returned = result.get("lines_returned", 0)
+                    lines_returned = actual_result.get("lines_returned", 0)
+                    file_content = actual_result.get("content", "")
                     content = f"File read successfully, {lines_returned} lines"
+                    if file_content:
+                        # Include a preview of the content
+                        preview = file_content[:500] + "..." if len(file_content) > 500 else file_content
+                        content += f"\n\nContent:\n{preview}"
                 else:
                     content = f"Tool {function_name} executed successfully"
             else:
-                error = result.get("error", "Unknown error")
+                # Tool execution failed
+                error = wrapper_result.get("error", "Unknown error")
                 content = f"Tool {function_name} failed: {error}"
             
             tool_summary.append(content)
         
-        # Create a single message with all tool results and instructions
-        combined_message = "Tool execution results:\n" + "\n".join(tool_summary)
+        # Create a single message with all tool results
+        combined_message = "Tool execution results:\n\n" + "\n\n---\n\n".join(tool_summary)
         
-        # Add instruction to not repeat code
+        # Add specific instructions based on what tools were used
+        instructions = []
+        
+        if any("shell_exec" in r["function_name"] for r in tool_results):
+            instructions.append("The shell command output has already been displayed to the user above. Please provide helpful context or summary, but do NOT repeat the raw output.")
+        
         if any("file_create" in r["function_name"] or "file_edit" in r["function_name"] for r in tool_results):
-            combined_message += "\n\nIMPORTANT: The file content/diff has already been displayed to the user during tool execution. Please do NOT repeat or show the code again. Just acknowledge the successful creation/edit."
+            instructions.append("The file content/diff has already been displayed to the user. Do NOT repeat or show the code again.")
+        
+        if instructions:
+            combined_message += "\n\nIMPORTANT INSTRUCTIONS:\n" + "\n".join(instructions)
         
         messages.append({
             "role": "user",

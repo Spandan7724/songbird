@@ -9,7 +9,7 @@ description = "A terminal-first AI coding companion that runs on local LLMs"
 readme = "README.md"
 license = "MIT"
 authors = [
-    {name = "Songbird Team"},
+    {name = "Spandan Chavab"},
 ]
 keywords = ["ai", "coding", "llm", "terminal", "cli", "assistant"]
 classifiers = [

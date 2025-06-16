@@ -39,3 +39,4 @@ tests/__pycache__
 TESTING/
 repomix-output.xml
 .claude/
+test_scripts/
