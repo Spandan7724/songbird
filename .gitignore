@@ -40,3 +40,4 @@ TESTING/
 repomix-output.xml
 .claude/
 test_scripts/
+songbird/llm/__pycache__/
