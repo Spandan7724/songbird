@@ -9,7 +9,7 @@ description = "A terminal-first AI coding companion that runs on local LLMs"
 readme = "README.md"
 license = "MIT"
 authors = [
-    {name = "Spandan Chavab"},
+    {name = "Spandan Chavan"},
 ]
 keywords = ["ai", "coding", "llm", "terminal", "cli", "assistant"]
 classifiers = [
@@ -43,10 +43,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/user/songbird"
-Documentation = "https://github.com/user/songbird/blob/main/README.md"
-Repository = "https://github.com/user/songbird.git"
-Issues = "https://github.com/user/songbird/issues"
+Homepage = "https://github.com/Spandan7724/songbird"
+Documentation = "https://github.com/Spandan7724/songbird/blob/main/README.md"
+Repository = "https://github.com/Spandan7724/songbird.git"
+Issues = "https://github.com/Spandan7724/songbird/issues"
 
 [project.scripts]
 songbird = "songbird.cli:app"
@@ -62,3 +62,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+[tool.pyrefly]
+project-includes = ["**/*"]
+project-excludes = ["**/*venv/**/*"]
