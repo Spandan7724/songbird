@@ -113,7 +113,7 @@ async def _chat_loop(orchestrator: ConversationOrchestrator):
                 break
                 
             # Get AI response
-            console.print("\n[bold yellow]Songbird[/bold yellow] (thinking...)", style="dim")
+            console.print("\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
             response = await orchestrator.chat(user_input)
             
             # Display response
