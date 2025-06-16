@@ -13,7 +13,9 @@ from .llm.providers import BaseProvider
 from .tools.executor import ToolExecutor
 from .tools.registry import get_tool_schemas
 from .tools.file_operations import display_diff_preview, apply_file_edit
-
+from .memory.models import Session, Message
+from .memory.manager import SessionManager
+from songbird.config import get_config
 
 def getch():
     """Get a single character from stdin, cross-platform."""
@@ -133,10 +135,12 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
 class ConversationOrchestrator:
     """Orchestrates conversations between user, LLM, and tools."""
     
-    def __init__(self, provider: BaseProvider, working_directory: str = "."):
+    def __init__(self, provider: BaseProvider, working_directory: str = ".", session: Optional[Session] = None):
         self.provider = provider
         self.tool_executor = ToolExecutor(working_directory)
         self.conversation_history: List[Dict[str, Any]] = []
+        self.session = session
+        self.session_manager = SessionManager(working_directory)
         
         # Add system prompt to guide the LLM
         self.system_prompt = """You are Songbird, an AI coding assistant with access to powerful tools for interacting with the file system and terminal.
@@ -164,11 +168,39 @@ ALWAYS use the appropriate tool when asked to perform file operations or termina
 
 When editing files, go straight to using file_edit - the tool will show the diff automatically."""
         
-        # Initialize conversation with system prompt
-        self.conversation_history.append({
-            "role": "system",
-            "content": self.system_prompt
-        })
+        # Initialize conversation history
+        if self.session and self.session.messages:
+            # Load existing conversation history from session
+            self._load_history_from_session()
+        else:
+            # Initialize new conversation with system prompt
+            self.conversation_history.append({
+                "role": "system",
+                "content": self.system_prompt
+            })
+            
+            # Add system message to session if it's new
+            if self.session:
+                self.session.add_message(Message(
+                    role="system",
+                    content=self.system_prompt
+                ))
+    
+    def _load_history_from_session(self):
+        """Load conversation history from session messages."""
+        self.conversation_history = []
+        
+        for msg in self.session.messages:
+            hist_msg = {
+                "role": msg.role,
+                "content": msg.content
+            }
+            if msg.tool_calls:
+                hist_msg["tool_calls"] = msg.tool_calls
+            if msg.tool_call_id:
+                hist_msg["tool_call_id"] = msg.tool_call_id
+            
+            self.conversation_history.append(hist_msg)
     
     async def chat(self, message: str) -> str:
         """
@@ -185,6 +217,13 @@ When editing files, go straight to using file_edit - the tool will show the diff
             "role": "user",
             "content": message
         })
+        
+        # Add to session if we have one
+        if self.session:
+            user_msg = Message(role="user", content=message)
+            self.session.add_message(user_msg)
+            # Save after each user message
+            self.session_manager.save_session(self.session)
         
         # Get available tools
         tools = self.tool_executor.get_available_tools()
@@ -267,6 +306,15 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 "tool_calls": serializable_tool_calls
             })
             
+            # Add to session
+            if self.session:
+                assistant_msg = Message(
+                    role="assistant",
+                    content=response.content or "",
+                    tool_calls=serializable_tool_calls
+                )
+                self.session.add_message(assistant_msg)
+            
             # Add tool results to history
             for tool_result in tool_results:
                 # The result from execute_tool is wrapped in {"success": bool, "result": actual_result}
@@ -276,8 +324,18 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 self.conversation_history.append({
                     "role": "tool",
                     "tool_call_id": tool_result["tool_call_id"],
-                    "content": json.dumps(actual_result)  # Store the actual result, not the wrapper
+                    # Store the actual result, not the wrapper
+                    "content": json.dumps(actual_result, default=str)
                 })
+                
+                # Add to session
+                if self.session:
+                    tool_msg = Message(
+                        role="tool",
+                        content=json.dumps(actual_result, default=str),
+                        tool_call_id=tool_result["tool_call_id"]
+                    )
+                    self.session.add_message(tool_msg)
             
             # Continue conversation with function results following official pattern
             if hasattr(self.provider, 'chat_with_messages'):
@@ -290,6 +348,14 @@ When editing files, go straight to using file_edit - the tool will show the diff
                         "role": "assistant",
                         "content": final_response.content
                     })
+                    
+                    # Add to session
+                    if self.session:
+                        final_msg = Message(role="assistant", content=final_response.content)
+                        self.session.add_message(final_msg)
+                        # Update summary
+                        self.session.summary = self.session.generate_summary()
+                        self.session_manager.save_session(self.session)
                     
                     return final_response.content
                 except Exception as e:
@@ -313,7 +379,16 @@ When editing files, go straight to using file_edit - the tool will show the diff
                             error = result["result"].get("error", "Unknown error")
                             status_messages.append(f"✗ {func_name} failed: {error}")
                     
-                    return "\n".join(status_messages) if status_messages else "Operation completed"
+                    status_content = "\n".join(status_messages) if status_messages else "Operation completed"
+                    
+                    # Add to session
+                    if self.session:
+                        status_msg = Message(role="assistant", content=status_content)
+                        self.session.add_message(status_msg)
+                        self.session.summary = self.session.generate_summary()
+                        self.session_manager.save_session(self.session)
+                    
+                    return status_content
             else:
                 # Fallback for providers that don't support chat_with_messages
                 if len(tool_results) == 1:
@@ -343,6 +418,13 @@ When editing files, go straight to using file_edit - the tool will show the diff
                     "content": content
                 })
                 
+                # Add to session
+                if self.session:
+                    final_msg = Message(role="assistant", content=content)
+                    self.session.add_message(final_msg)
+                    self.session.summary = self.session.generate_summary()
+                    self.session_manager.save_session(self.session)
+                
                 return content
         else:
             # No tool calls, just return the response
@@ -350,6 +432,14 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 "role": "assistant",
                 "content": response.content
             })
+            
+            # Add to session
+            if self.session:
+                assistant_msg = Message(role="assistant", content=response.content)
+                self.session.add_message(assistant_msg)
+                self.session.summary = self.session.generate_summary()
+                self.session_manager.save_session(self.session)
+            
             return response.content
     
     def get_conversation_history(self) -> List[Dict[str, Any]]:
@@ -435,31 +525,62 @@ When editing files, go straight to using file_edit - the tool will show the diff
                     else:
                         content = f"Successfully edited file: {file_path}"
                 elif function_name == "shell_exec":
-                    # Check if output was displayed live
-                    if actual_result.get("output_displayed", True):  # Default to True for new shell_exec
-                        # Output was already shown, just provide context
+                    # ------------------------------------------------------ #
+                    # Build the assistant-facing summary ('content' string)
+                    # ------------------------------------------------------ #
+                    if actual_result.get("output_displayed", True):
+                        # Output was already streamed live
                         exit_code = actual_result.get("exit_code", 0)
-                        command = actual_result.get("command", "unknown command")
-                        
+                        command = actual_result.get(
+                            "command", "unknown command")
                         if exit_code == 0:
-                            content = f"The command '{command}' executed successfully and the output was displayed above."
+                            content = (
+                                f"The command '{command}' executed successfully "
+                                "and the output was displayed above."
+                            )
                         else:
-                            content = f"The command '{command}' failed with exit code {exit_code}. See the output above for details."
+                            content = (
+                                f"The command '{command}' failed with exit code "
+                                f"{exit_code}. See the live output above."
+                            )
                     else:
-                        # Output wasn't displayed (shouldn't happen with current implementation)
+                        # Fallback – output captured but not streamed
                         stdout = actual_result.get("stdout", "").strip()
                         stderr = actual_result.get("stderr", "").strip()
                         exit_code = actual_result.get("exit_code", 0)
-                        command = actual_result.get("command", "unknown command")
-                        
+                        command = actual_result.get(
+                            "command", "unknown command")
+
                         content = f"Executed command: {command}\nExit code: {exit_code}"
-                        
                         if stdout:
                             content += f"\n\nOutput:\n{stdout}"
                         if stderr:
                             content += f"\n\nError output:\n{stderr}"
                         if not stdout and not stderr:
                             content += "\n\n(No output produced)"
+                    from songbird.config import get_config
+                    # {"max_display_chars": … , "max_shell_lines": …}
+                    cfg = get_config()
+                    lines = (
+                        actual_result.get("stdout", "").splitlines()
+                        + actual_result.get("stderr", "").splitlines()
+                    )
+
+                    if lines:  # only log if there was any output
+                        display_lines = lines[: cfg["max_shell_lines"]]
+                        block = "\n".join(display_lines)
+                        if len(lines) > cfg["max_shell_lines"]:
+                            block += "\n… (truncated)"
+                        # Make sure we don't exceed max chars
+                        if len(block) > cfg["max_display_chars"]:
+                            block = block[: cfg["max_display_chars"]
+                                          ] + "\n… (truncated)"
+
+                        if self.session:
+                            self.session.add_message(
+                                Message(role="display", content=block)
+                            )
+
                         
                 elif function_name == "file_search":
                     total_matches = actual_result.get("total_matches", 0)
@@ -545,8 +666,20 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 }
             
             # Display the diff preview
-            display_diff_preview(edit_result["diff_preview"], edit_result["file_path"])
-            
+            # Display the diff preview
+            diff_txt = edit_result["diff_preview"]
+            display_diff_preview(diff_txt, edit_result["file_path"])
+
+            # ---------- log the diff for replay (with truncation) ----------
+            limit = get_config()["max_display_chars"]
+            if len(diff_txt) > limit:
+                diff_txt = diff_txt[:limit] + "\n… (truncated)"
+
+            if self.session:
+                self.session.add_message(
+                    Message(role="display", content=diff_txt)
+                )
+
             # Ask for confirmation with interactive menu
             if os.getenv("SONGBIRD_AUTO_APPLY") == "y":
                 user_confirmed = True
