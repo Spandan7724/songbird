@@ -362,3 +362,42 @@ def display_diff_preview(diff_preview: str, file_path: str):
         width=None  # Let it auto-size to content
     )
     console.print(panel)
+    
+    
+## CUSTOM DIFF PREVIEW FUNCTIONALITY
+# Uncomment this function if you want to use the custom diff preview display    
+# def display_diff_preview(diff_preview: str, file_path: str):
+#     """Display a formatted diff preview with Rich."""
+#     # Process diff lines to apply custom colors
+#     lines = diff_preview.split('\n')
+#     formatted_text = Text()
+    
+#     for line in lines:
+#         if line.startswith('---'):
+#             # File header (old file)
+#             formatted_text.append(line + '\n', style="bold blue")
+#         elif line.startswith('+++'):
+#             # File header (new file)
+#             formatted_text.append(line + '\n', style="bold blue")
+#         elif line.startswith('@@'):
+#             # Hunk header
+#             formatted_text.append(line + '\n', style="bold cyan")
+#         elif line.startswith('-'):
+#             # Removed lines - you can change this color!
+#             formatted_text.append(line + '\n', style="bold red")
+#         elif line.startswith('+'):
+#             # Added lines
+#             formatted_text.append(line + '\n', style="bold green")
+#         else:
+#             # Context lines (unchanged)
+#             formatted_text.append(line + '\n', style="dim white")
+    
+#     panel = Panel(
+#         formatted_text,
+#         title=f"Proposed changes to {file_path}",
+#         title_align="left",
+#         border_style="blue",
+#         expand=True,
+#         width=None  # Let it auto-size to content
+#     )
+#     console.print(panel)        

@@ -3,12 +3,104 @@
 Conversation orchestrator that handles LLM interactions with tool calling.
 """
 import json
+import os
+import sys
 from typing import List, Dict, Any, Optional
+from rich.console import Console
 from rich.prompt import Confirm
 from .llm.providers import BaseProvider
 from .tools.executor import ToolExecutor
 from .tools.registry import get_tool_schemas
 from .tools.file_operations import display_diff_preview, apply_file_edit
+
+
+def getch():
+    """Get a single character from stdin, cross-platform."""
+    if os.name == 'nt':  # Windows
+        import msvcrt
+        return msvcrt.getch().decode('utf-8', 'ignore')
+    else:  # Unix/Linux/macOS
+        import tty, termios
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            return sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def interactive_menu(prompt: str, options: List[str], default_index: int = 0) -> int:
+    """
+    Display an interactive menu with arrow key navigation.
+    
+    Args:
+        prompt: The question/prompt to display
+        options: List of menu options
+        default_index: Index of the default selected option
+        
+    Returns:
+        Index of the selected option
+    """
+    console = Console()
+    current = default_index
+    
+    # Display prompt
+    console.print(f"\n{prompt}", style="bold white")
+    
+    # Initial render - create space for menu
+    print('\n' * len(options))
+    
+    def render():
+        # Move cursor up to start of menu
+        sys.stdout.write(f'\x1b[{len(options)}F')
+        for i, opt in enumerate(options):
+            if i == current:
+                # Selected option with arrow and green color
+                sys.stdout.write(f"\x1b[1;32m▶ {opt}\x1b[0m\n")
+            else:
+                # Normal option
+                sys.stdout.write(f"  {opt}\n")
+        sys.stdout.flush()
+    
+    render()
+    
+    try:
+        while True:
+            ch = getch()
+            
+            if ch == '\x1b':  # Escape sequence (arrow keys)
+                try:
+                    seq = getch() + getch()
+                    if seq == '[A' and current > 0:  # Up arrow
+                        current -= 1
+                    elif seq == '[B' and current < len(options) - 1:  # Down arrow
+                        current += 1
+                except:
+                    pass  # Ignore malformed escape sequences
+            elif ch in ('\r', '\n'):  # Enter
+                break
+            elif ch in ('\x03', '\x04'):  # Ctrl+C or Ctrl+D
+                raise KeyboardInterrupt
+            elif ch == 'w' and current > 0:  # w key (up)
+                current -= 1
+            elif ch == 's' and current < len(options) - 1:  # s key (down)
+                current += 1
+            elif ch.isdigit():  # Number keys for direct selection
+                idx = int(ch) - 1
+                if 0 <= idx < len(options):
+                    current = idx
+                    break
+            
+            render()
+            
+    except KeyboardInterrupt:
+        console.print("\n\nCancelled by user", style="red")
+        raise
+    
+    # Show final selection
+    console.print(f"\nSelected: {options[current]}", style="bold cyan")
+    return current
 
 
 class ConversationOrchestrator:
@@ -25,27 +117,25 @@ class ConversationOrchestrator:
 IMPORTANT: You have access to the following tools:
 1. shell_exec - Execute ANY terminal/shell command (ls, dir, pwd, cd, python, git, pip, npm, etc.)
 2. file_create - Create new files with content
-3. file_edit - Edit existing files (shows diff before applying)
+3. file_edit - Edit existing files (shows diff before applying) - ALWAYS use this directly when asked to edit, don't show the code first
 4. file_read - Read file contents
-5. file_search - POWERFUL search tool that can find:
-   - Files by name (e.g., "find test.py" or "find all Python files")
-   - Functions by name (e.g., "find the calculate_total function")
-   - Classes by name (e.g., "find the UserModel class")
-   - Any text or code pattern in files
-   - Variables and their definitions
-   - The tool automatically detects what you're searching for!
+5. file_search - Fast search using ripgrep:
+   - Find all Python files: Use "*.py"
+   - Find specific file: Use exact name like "test.py" or glob like "*test*.py"
+   - Search text in files: Use any text pattern
+   - Filter by type: Use file_type parameter (py, js, md, etc.)
 
 When users ask you to:
-- Find a file → Use file_search with the filename
-- Find a function/class → Use file_search with the name
-- Search for code → Use file_search with the pattern
-- List files/folders → Use shell_exec with 'ls' or 'dir'
-- Run Python scripts → Use shell_exec
-- Work with a specific function → First use file_search to find it, then file_read or file_edit
+- Edit a file → Use file_edit IMMEDIATELY with the new content, don't show the code first
+- Check if a file exists → Use file_search with the exact filename
+- Find files → Use file_search with glob patterns
+- Search for text/code → Use file_search with the text pattern
+- List files/folders → Use shell_exec with 'ls' or 'dir' 
+- Run scripts → Use shell_exec
 
 ALWAYS use the appropriate tool when asked to perform file operations or terminal commands. Never say you cannot do something that these tools enable.
 
-When users mention a file or function but don't provide the full path, use file_search to locate it first."""
+When editing files, go straight to using file_edit - the tool will show the diff automatically."""
         
         # Initialize conversation with system prompt
         self.conversation_history.append({
@@ -106,6 +196,10 @@ When users mention a file or function but don't provide the full path, use file_
                 else:
                     result = await self.tool_executor.execute_tool(function_name, arguments)
                 
+                # Ensure result has the expected structure
+                if not isinstance(result, dict):
+                    result = {"success": False, "error": "Invalid result format"}
+                
                 # Get tool call ID
                 if hasattr(tool_call, 'function'):
                     tool_call_id = getattr(tool_call, 'id', "")
@@ -160,16 +254,39 @@ When users mention a file or function but don't provide the full path, use file_
             
             # Continue conversation with function results following official pattern
             if hasattr(self.provider, 'chat_with_messages'):
-                messages = self._build_messages_with_function_results(tool_results)
-                final_response = self.provider.chat_with_messages(messages, tools=None)
-                
-                # Add final response to history
-                self.conversation_history.append({
-                    "role": "assistant",
-                    "content": final_response.content
-                })
-                
-                return final_response.content
+                try:
+                    messages = self._build_messages_with_function_results(tool_results)
+                    final_response = self.provider.chat_with_messages(messages, tools=None)
+                    
+                    # Add final response to history
+                    self.conversation_history.append({
+                        "role": "assistant",
+                        "content": final_response.content
+                    })
+                    
+                    return final_response.content
+                except Exception as e:
+                    # If there's an error, provide a simple status message
+                    Console().print(f"[dim]Debug: Error in final response: {e}[/dim]")
+                    
+                    # Provide a simple status based on tool results
+                    status_messages = []
+                    for result in tool_results:
+                        func_name = result["function_name"]
+                        success = result["result"].get("success", False)
+                        
+                        if success:
+                            if func_name == "file_edit":
+                                status_messages.append("✓ File edited successfully")
+                            elif func_name == "file_create":
+                                status_messages.append("✓ File created successfully")
+                            else:
+                                status_messages.append(f"✓ {func_name} completed")
+                        else:
+                            error = result["result"].get("error", "Unknown error")
+                            status_messages.append(f"✗ {func_name} failed: {error}")
+                    
+                    return "\n".join(status_messages) if status_messages else "Operation completed"
             else:
                 # Fallback for providers that don't support chat_with_messages
                 if len(tool_results) == 1:
@@ -286,7 +403,10 @@ When users mention a file or function but don't provide the full path, use file_
                         content = f"Successfully created file: {file_path}"
                 elif function_name == "file_edit":
                     file_path = actual_result.get("file_path", "unknown file")
-                    content = f"Successfully edited file: {file_path}\n(Diff already displayed above - no need to show the code again)"
+                    if actual_result.get("diff_displayed", False):
+                        content = f"Successfully edited file: {file_path}\n(Diff already displayed above - no need to show the code again)"
+                    else:
+                        content = f"Successfully edited file: {file_path}"
                 elif function_name == "shell_exec":
                     # Check if output was displayed live
                     if actual_result.get("output_displayed", True):  # Default to True for new shell_exec
@@ -391,14 +511,21 @@ When users mention a file or function but don't provide the full path, use file_
             if not edit_result.get("changes_made"):
                 return {
                     "success": True,
-                    "message": "No changes needed - file content is already as requested"
+                    "result": {
+                        "success": True,
+                        "message": "No changes needed - file content is already as requested"
+                    }
                 }
             
             # Display the diff preview
             display_diff_preview(edit_result["diff_preview"], edit_result["file_path"])
             
-            # Ask for confirmation
-            if Confirm.ask("\nApply these changes?"):
+            # Ask for confirmation with interactive menu
+            options = ["Yes", "No"]
+            selected_index = interactive_menu("Apply these changes?", options, default_index=0)
+            user_confirmed = (selected_index == 0)  # Yes = index 0, No = index 1
+            
+            if user_confirmed:
                 # Apply the edit
                 apply_result = await apply_file_edit(
                     arguments["file_path"],
@@ -409,20 +536,32 @@ When users mention a file or function but don't provide the full path, use file_
                 if apply_result["success"]:
                     return {
                         "success": True,
-                        "message": f"{apply_result['message']}",
-                        "file_path": apply_result["file_path"],
-                        "diff_displayed": True  # Flag that diff was shown
+                        "result": {
+                            "success": True,
+                            "message": apply_result["message"],
+                            "file_path": apply_result["file_path"],
+                            "diff_displayed": True
+                        }
                     }
                 else:
-                    return apply_result
+                    return {
+                        "success": False,
+                        "result": apply_result
+                    }
             else:
                 return {
                     "success": False,
-                    "message": "Changes cancelled by user"
+                    "result": {
+                        "success": False,
+                        "message": "Changes cancelled by user"
+                    }
                 }
                 
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Error handling file edit: {e}"
+                "result": {
+                    "success": False,
+                    "error": f"Error handling file edit: {e}"
+                }
             }

@@ -15,32 +15,31 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "file_search",
-            "description": "Search for files, text patterns, functions, classes, or variables. Can find: filenames (e.g., 'test.py'), functions (e.g., 'calculate_total'), classes, text in files, or any code pattern. Automatically detects what you're looking for.",
+            "description": "Search for text patterns or files. Use glob patterns (*.py) to find files, or any text to search content. Powered by ripgrep for speed.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "pattern": {
                         "type": "string",
-                        "description": "What to search for - can be filename, function name, class name, or any text/code pattern"
+                        "description": "Search pattern - use glob (*.py) for files, or any text/regex for content search"
                     },
                     "directory": {
                         "type": "string", 
-                        "description": "Directory path to search in (defaults to current working directory)",
+                        "description": "Directory to search in (default: current directory)",
                         "default": "."
                     },
-                    "search_type": {
+                    "file_type": {
                         "type": "string",
-                        "description": "Type of search: 'auto' (default), 'filename', 'text', 'function', 'class', 'variable'",
-                        "enum": ["auto", "filename", "text", "function", "class", "variable"],
-                        "default": "auto"
+                        "description": "Filter by file type: py, js, md, txt, json, yaml, etc. (optional)"
                     },
-                    "file_pattern": {
-                        "type": "string",
-                        "description": "Optional glob pattern to filter files (e.g., '*.py' for Python files only)"
+                    "case_sensitive": {
+                        "type": "boolean",
+                        "description": "Whether search is case sensitive (default: false)",
+                        "default": False
                     },
                     "max_results": {
                         "type": "integer",
-                        "description": "Maximum number of results to return (default: 50)",
+                        "description": "Maximum results to return (default: 50)",
                         "default": 50
                     }
                 },
