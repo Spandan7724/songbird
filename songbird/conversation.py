@@ -2,6 +2,7 @@
 """
 Conversation orchestrator that handles LLM interactions with tool calling.
 """
+import asyncio
 import json
 import os
 import sys
@@ -18,16 +19,32 @@ def getch():
     """Get a single character from stdin, cross-platform."""
     if os.name == 'nt':  # Windows
         import msvcrt
-        return msvcrt.getch().decode('utf-8', 'ignore')
+        ch1 = msvcrt.getch()
+        if ch1 in (b'\x00', b'\xe0'):          # arrow / function key prefix
+            ch2 = msvcrt.getch()
+            if ch2 == b'H':                    # Up
+                return '\x1b[A'
+            elif ch2 == b'P':                  # Down
+                return '\x1b[B'
+            else:
+                return ''                      # ignore other keys
+        return ch1.decode('utf-8', 'ignore')
     else:  # Unix/Linux/macOS
+        # Check if stdin is a TTY
+        if not sys.stdin.isatty():
+            return ''  # Fallback for non-TTY environments
+        
         import tty, termios
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
         try:
-            tty.setraw(fd)
-            return sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                return sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        except:
+            return ''  # Fallback on any termios error
 
 
 def interactive_menu(prompt: str, options: List[str], default_index: int = 0) -> int:
@@ -69,7 +86,12 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
         while True:
             ch = getch()
             
-            if ch == '\x1b':  # Escape sequence (arrow keys)
+            # If getch() fails (non-TTY environment), auto-select default
+            if ch == '':
+                console.print(f"\nAuto-selected: {options[current]} (non-interactive environment)", style="yellow")
+                break
+            
+            if ch == '\x1b':  # Escape sequence (arrow keys) - Unix/Linux
                 try:
                     seq = getch() + getch()
                     if seq == '[A' and current > 0:  # Up arrow
@@ -78,6 +100,11 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
                         current += 1
                 except:
                     pass  # Ignore malformed escape sequences
+            elif ch == '\x1b[A' and current > 0:  # Up (Windows-mapped)
+                current -= 1
+            elif ch == '\x1b[B' and current < len(options) - 1:  # Down (Windows-mapped)
+                current += 1
+
             elif ch in ('\r', '\n'):  # Enter
                 break
             elif ch in ('\x03', '\x04'):  # Ctrl+C or Ctrl+D
@@ -521,9 +548,16 @@ When editing files, go straight to using file_edit - the tool will show the diff
             display_diff_preview(edit_result["diff_preview"], edit_result["file_path"])
             
             # Ask for confirmation with interactive menu
-            options = ["Yes", "No"]
-            selected_index = interactive_menu("Apply these changes?", options, default_index=0)
-            user_confirmed = (selected_index == 0)  # Yes = index 0, No = index 1
+            if os.getenv("SONGBIRD_AUTO_APPLY") == "y":
+                user_confirmed = True
+            else:
+                selected_index = await asyncio.to_thread(
+                    interactive_menu,
+                    "Apply these changes?",
+                    ["Yes", "No"],         
+                    default_index=0        
+                )
+                user_confirmed = (selected_index == 0)
             
             if user_confirmed:
                 # Apply the edit
