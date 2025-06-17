@@ -319,13 +319,29 @@ def chat(
     session_manager = SessionManager(os.getcwd())
     session = None
 
+    # Variables to track provider config
+    restored_provider = None
+    restored_model = None
+
     # Handle session continuation/resumption
     if continue_session:
         session = session_manager.get_latest_session()
         if session:
+            # IMPORTANT: get_latest_session returns a session with None messages
+            # We need to load the full session
+            session = session_manager.load_session(session.id)
+            
             console.print(
                 f"\n[bold green]Continuing session from {format_time_ago(session.updated_at)}[/bold green]")
             console.print(f"Summary: {session.summary}", style="dim")
+
+            # Restore provider configuration from session
+            if session.provider_config:
+                restored_provider = session.provider_config.get("provider")
+                restored_model = session.provider_config.get("model")
+                if restored_provider and restored_model:
+                    console.print(
+                        f"[dim]Restored: {restored_provider} - {restored_model}[/dim]")
 
             # Replay the conversation
             replay_conversation(session)
@@ -344,6 +360,15 @@ def chat(
                     console.print(
                         f"\n[bold green]Resuming session from {format_time_ago(session.updated_at)}[/bold green]")
                     console.print(f"Summary: {session.summary}", style="dim")
+
+                    # Restore provider configuration from session
+                    if session.provider_config:
+                        restored_provider = session.provider_config.get(
+                            "provider")
+                        restored_model = session.provider_config.get("model")
+                        if restored_provider and restored_model:
+                            console.print(
+                                f"[dim]Restored: {restored_provider} - {restored_model}[/dim]")
 
                     # Replay the conversation
                     replay_conversation(session)
@@ -368,21 +393,28 @@ def chat(
         "I can search, read, edit files with diffs, and run shell commands.", style="dim")
     console.print(
         "Type '/' for commands, or 'exit' to quit.\n", style="dim")
-    
+
     # Load command system
     command_registry = load_all_commands()
     command_selector = CommandSelector(command_registry, console)
     command_input_handler = CommandInputHandler(command_registry, console)
 
     # Determine provider and model
-    provider_name = provider or get_default_provider()
+    # Use restored values if available, otherwise use defaults
+    provider_name = restored_provider or provider or get_default_provider()
 
     # Set default models based on provider
     default_models = {
         "gemini": "gemini-2.0-flash-exp",
         "ollama": "qwen2.5-coder:7b"
     }
-    model_name = model or default_models.get(provider_name, "qwen2.5-coder:7b")
+    model_name = restored_model or model or default_models.get(
+        provider_name, "qwen2.5-coder:7b")
+
+    # Save initial provider config to session (if we have a session)
+    if session:
+        session.update_provider_config(provider_name, model_name)
+        session_manager.save_session(session)
 
     console.print(
         f"Using provider: {provider_name}, model: {model_name}", style="dim")
@@ -405,8 +437,9 @@ def chat(
         orchestrator = ConversationOrchestrator(
             provider_instance, os.getcwd(), session=session)
 
-        # Start chat loop
-        asyncio.run(_chat_loop(orchestrator, command_registry, command_input_handler, provider_name, provider_instance))
+        # Start chat loop - pass session_manager so we can save provider changes
+        asyncio.run(_chat_loop(orchestrator, command_registry, command_input_handler,
+                               provider_name, provider_instance, session_manager))
 
     except Exception as e:
         console.print(f"Error starting Songbird: {e}", style="red")
@@ -422,8 +455,13 @@ def chat(
                 f"And the model is available: ollama pull {model_name}", style="dim")
 
 
-async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry, command_input_handler, provider_name: str, provider_instance):
+# Updated _chat_loop function for cli.py
+
+async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
+                     command_input_handler, provider_name: str, provider_instance,
+                     session_manager=None):
     """Run the interactive chat loop."""
+
     while True:
         try:
             # Get user input with command support
@@ -432,7 +470,7 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry, c
             if user_input.lower() in ["exit", "quit", "bye"]:
                 console.print("\nGoodbye!", style="bold blue")
                 break
-            
+
             if not user_input.strip():
                 continue
 
@@ -440,25 +478,25 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry, c
             if is_command_input(user_input):
                 command_name, args = parse_command_input(user_input)
                 command = command_registry.get_command(command_name)
-                
+
                 if command:
-                    # Prepare command context
+                    # Prepare command context with current model
                     context = {
                         "provider": provider_name,
-                        "model": provider_instance.model,
+                        "model": provider_instance.model,  # Always use current model
                         "provider_instance": provider_instance,
                         "orchestrator": orchestrator
                     }
-                    
+
                     # Execute command
                     result = await command.execute(args, context)
-                    
+
                     if result.message:
                         if result.success:
                             console.print(f"[green]{result.message}[/green]")
                         else:
                             console.print(f"[red]{result.message}[/red]")
-                    
+
                     # Handle special command results
                     if result.data and "action" in result.data:
                         if result.data["action"] == "clear_history":
@@ -466,16 +504,30 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry, c
                             orchestrator.conversation_history = []
                             if orchestrator.session:
                                 orchestrator.session.messages = []
-                                orchestrator.session_manager.save_session(orchestrator.session)
+                                orchestrator.session_manager.save_session(
+                                    orchestrator.session)
                         elif result.data.get("new_model"):
-                            # Model was changed, update display
+                            # Model was changed, update display and save to session
                             new_model = result.data["new_model"]
-                            console.print(f"[dim]Now using: {provider_name} - {new_model}[/dim]")
-                    
+
+                            # Update session with new provider config
+                            if orchestrator.session:
+                                orchestrator.session.update_provider_config(
+                                    provider_name, new_model)
+                                if session_manager:
+                                    session_manager.save_session(
+                                        orchestrator.session)
+
+                            # Show the model change
+                            console.print(
+                                f"[dim]Now using: {provider_name} - {new_model}[/dim]")
+
                     continue
                 else:
-                    console.print(f"[red]Unknown command: /{command_name}[/red]")
-                    console.print("Type [green]/help[/green] to see available commands.")
+                    console.print(
+                        f"[red]Unknown command: /{command_name}[/red]")
+                    console.print(
+                        "Type [green]/help[/green] to see available commands.")
                     continue
 
             # Regular AI response
@@ -492,6 +544,8 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry, c
             break
         except Exception as e:
             console.print(f"\nError: {e}", style="red")
+
+
 
 
 @app.command()
