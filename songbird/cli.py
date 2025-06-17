@@ -497,15 +497,16 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                             console.print(f"[red]{result.message}[/red]")
 
                     # Handle special command results
-                    if result.data and "action" in result.data:
-                        if result.data["action"] == "clear_history":
+                    if result.data:
+                        if "action" in result.data and result.data["action"] == "clear_history":
                             # Clear conversation history
                             orchestrator.conversation_history = []
                             if orchestrator.session:
                                 orchestrator.session.messages = []
                                 orchestrator.session_manager.save_session(
                                     orchestrator.session)
-                        elif result.data.get("new_model"):
+                        
+                        if result.data.get("new_model"):
                             # Model was changed, update display and save to session
                             new_model = result.data["new_model"]
 
