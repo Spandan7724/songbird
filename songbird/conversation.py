@@ -76,8 +76,8 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
         sys.stdout.write(f'\x1b[{len(options)}F')
         for i, opt in enumerate(options):
             if i == current:
-                # Selected option with arrow and green color
-                sys.stdout.write(f"\x1b[1;32m▶ {opt}\x1b[0m\n")
+                # Selected option with arrow and cornflower_blue color
+                sys.stdout.write(f"\x1b[1;38;5;75m▶ {opt}\x1b[0m\n")
             else:
                 # Normal option
                 sys.stdout.write(f"  {opt}\n")
