@@ -37,7 +37,7 @@ class HelpCommand(BaseCommand):
         
         # Create help table
         table = Table(title="Available Commands", show_header=True, header_style="bold blue")
-        table.add_column("Command", style="green", width=15)
+        table.add_column("Command", style="cornflower_blue", width=15)
         table.add_column("Aliases", style="dim", width=10)
         table.add_column("Description", style="white")
         
@@ -52,27 +52,26 @@ class HelpCommand(BaseCommand):
         # Create usage information
         usage_text = """
 [bold]Usage:[/bold]
-• Type [green]/[/green] to open the command selector
-• Use [green]↑↓[/green] arrow keys to navigate
-• Press [green]Enter[/green] to select a command
-• Press [green]Esc[/green] to cancel
-• Type after [green]/[/green] to filter commands
+• Type [cornflower_blue]/[/cornflower_blue] to open the command selector
+• Use [cornflower_blue]↑↓[/cornflower_blue] arrow keys to navigate
+• Press [cornflower_blue]Enter[/cornflower_blue] to select a command
+• Press [cornflower_blue]Esc[/cornflower_blue] to cancel
 
 [bold]Examples:[/bold]
-• [green]/model[/green] - Switch LLM model interactively
-• [green]/model qwen2.5-coder:7b[/green] - Switch to specific model
-• [green]/clear[/green] - Clear current conversation
-• [green]/help model[/green] - Get help for specific command
+• [cornflower_blue]/model[/cornflower_blue] - Switch LLM model interactively
+• [cornflower_blue]/model qwen2.5-coder:7b[/cornflower_blue] - Switch to specific model
+• [cornflower_blue]/clear[/cornflower_blue] - Clear current conversation
+• [cornflower_blue]/help model[/cornflower_blue] - Get help for specific command
 """
         
         self.console.print()
         self.console.print(table)
         self.console.print()
-        self.console.print(Panel(usage_text, title="Command System Help", border_style="blue"))
+        self.console.print(Panel(usage_text, title="Command System Help", border_style="cornflower_blue"))
         
         return CommandResult(
             success=True,
-            message="Help displayed"
+            message=""
         )
     
     def _show_command_help(self, command_name: str) -> CommandResult:
