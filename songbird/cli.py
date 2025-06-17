@@ -437,9 +437,9 @@ def chat(
         orchestrator = ConversationOrchestrator(
             provider_instance, os.getcwd(), session=session)
 
-        # Start chat loop - pass session_manager so we can save provider changes
+        # Start chat loop
         asyncio.run(_chat_loop(orchestrator, command_registry, command_input_handler,
-                               provider_name, provider_instance, session_manager))
+                               provider_name, provider_instance))
 
     except Exception as e:
         console.print(f"Error starting Songbird: {e}", style="red")
@@ -458,8 +458,7 @@ def chat(
 # Updated _chat_loop function for cli.py
 
 async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
-                     command_input_handler, provider_name: str, provider_instance,
-                     session_manager=None):
+                     command_input_handler, provider_name: str, provider_instance):
     """Run the interactive chat loop."""
 
     while True:
@@ -514,9 +513,9 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                             if orchestrator.session:
                                 orchestrator.session.update_provider_config(
                                     provider_name, new_model)
-                                if session_manager:
-                                    session_manager.save_session(
-                                        orchestrator.session)
+                                # Always save session when model changes
+                                orchestrator.session_manager.save_session(
+                                    orchestrator.session)
 
                             # Show the model change
                             console.print(
