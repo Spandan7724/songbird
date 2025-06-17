@@ -54,10 +54,11 @@ class SessionManager:
         self.save_session(session)
         return session
     
+
     def save_session(self, session: Session):
         """Save a session to disk."""
         session_file = self.storage_dir / f"{session.id}.jsonl"
-        
+
         # Write each message as a separate JSON line
         with open(session_file, "w", encoding="utf-8") as f:
             # First line is session metadata
@@ -67,48 +68,52 @@ class SessionManager:
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "summary": session.summary,
-                "project_path": session.project_path
+                "project_path": session.project_path,
+                "provider_config": session.provider_config  # ADD THIS LINE
             }
             f.write(json.dumps(metadata) + "\n")
-            
+
             # Following lines are messages
             for msg in session.messages:
                 msg_data = msg.to_dict()
                 msg_data["type"] = "message"
                 f.write(json.dumps(msg_data) + "\n")
     
+
     def load_session(self, session_id: str) -> Optional[Session]:
         """Load a session from disk."""
         session_file = self.storage_dir / f"{session_id}.jsonl"
-        
+
         if not session_file.exists():
             return None
-        
+
         session = None
         messages = []
-        
+
         with open(session_file, "r", encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
                     continue
-                    
+
                 data = json.loads(line)
-                
+
                 if data.get("type") == "metadata":
                     session = Session(
                         id=data["id"],
                         created_at=datetime.fromisoformat(data["created_at"]),
                         updated_at=datetime.fromisoformat(data["updated_at"]),
                         summary=data.get("summary", ""),
-                        project_path=data.get("project_path", "")
+                        project_path=data.get("project_path", ""),
+                        provider_config=data.get(
+                            "provider_config", {})  # ADD THIS LINE
                     )
                 elif data.get("type") == "message":
                     messages.append(Message.from_dict(data))
-        
+
         if session:
             session.messages = messages
             return session
-        
+
         return None
     
     def get_latest_session(self) -> Optional[Session]:
@@ -121,38 +126,41 @@ class SessionManager:
         sessions.sort(key=lambda s: s.updated_at, reverse=True)
         return sessions[0]
     
+
     def list_sessions(self) -> List[Session]:
         """List all sessions for the current project."""
         sessions = []
-        
+
         if not self.storage_dir.exists():
             return sessions
-        
+
         for session_file in self.storage_dir.glob("*.jsonl"):
             # Read just the metadata line
             with open(session_file, "r", encoding="utf-8") as f:
                 first_line = f.readline()
                 if not first_line:
                     continue
-                
+
                 data = json.loads(first_line)
                 if data.get("type") == "metadata":
                     # Count messages by counting remaining lines
                     message_count = sum(1 for _ in f)
-                    
+
                     session = Session(
                         id=data["id"],
                         created_at=datetime.fromisoformat(data["created_at"]),
                         updated_at=datetime.fromisoformat(data["updated_at"]),
                         summary=data.get("summary", ""),
-                        project_path=data.get("project_path", "")
+                        project_path=data.get("project_path", ""),
+                        provider_config=data.get(
+                            "provider_config", {})  # ADD THIS LINE
                     )
-                    
+
                     # Add dummy messages for count (we don't load all messages for listing)
                     session.messages = [None] * message_count  # type: ignore
-                    
+
                     sessions.append(session)
-        
+
         return sessions
     
     def delete_session(self, session_id: str) -> bool:
