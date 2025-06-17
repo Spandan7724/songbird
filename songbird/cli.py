@@ -16,6 +16,8 @@ from .llm.providers import get_provider, list_available_providers, get_default_p
 from .conversation import ConversationOrchestrator, interactive_menu
 from .memory.manager import SessionManager
 from .memory.models import Session
+from .commands import CommandSelector, get_command_registry, CommandInputHandler
+from .commands.loader import load_all_commands, is_command_input, parse_command_input
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich",
                   help="Songbird - Terminal-first AI coding companion", no_args_is_help=False)
@@ -363,7 +365,14 @@ def chat(
     console.print(
         "Available tools: file_search, file_read, file_create, file_edit, shell_exec", style="dim")
     console.print(
-        "I can search, read, edit files with diffs, and run shell commands. Type 'exit' to quit.\n", style="dim")
+        "I can search, read, edit files with diffs, and run shell commands.", style="dim")
+    console.print(
+        "Type '/' for commands, or 'exit' to quit.\n", style="dim")
+    
+    # Load command system
+    command_registry = load_all_commands()
+    command_selector = CommandSelector(command_registry, console)
+    command_input_handler = CommandInputHandler(command_registry, console)
 
     # Determine provider and model
     provider_name = provider or get_default_provider()
@@ -397,7 +406,7 @@ def chat(
             provider_instance, os.getcwd(), session=session)
 
         # Start chat loop
-        asyncio.run(_chat_loop(orchestrator))
+        asyncio.run(_chat_loop(orchestrator, command_registry, command_input_handler, provider_name, provider_instance))
 
     except Exception as e:
         console.print(f"Error starting Songbird: {e}", style="red")
@@ -413,18 +422,63 @@ def chat(
                 f"And the model is available: ollama pull {model_name}", style="dim")
 
 
-async def _chat_loop(orchestrator: ConversationOrchestrator):
+async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry, command_input_handler, provider_name: str, provider_instance):
     """Run the interactive chat loop."""
     while True:
         try:
-            # Get user input
-            user_input = Prompt.ask("\n[bold cyan]You[/bold cyan]")
+            # Get user input with command support
+            user_input = command_input_handler.get_input_with_commands("You")
 
             if user_input.lower() in ["exit", "quit", "bye"]:
                 console.print("\nGoodbye!", style="bold blue")
                 break
+            
+            if not user_input.strip():
+                continue
 
-            # Get AI response
+            # Handle command input
+            if is_command_input(user_input):
+                command_name, args = parse_command_input(user_input)
+                command = command_registry.get_command(command_name)
+                
+                if command:
+                    # Prepare command context
+                    context = {
+                        "provider": provider_name,
+                        "model": provider_instance.model,
+                        "provider_instance": provider_instance,
+                        "orchestrator": orchestrator
+                    }
+                    
+                    # Execute command
+                    result = await command.execute(args, context)
+                    
+                    if result.message:
+                        if result.success:
+                            console.print(f"[green]{result.message}[/green]")
+                        else:
+                            console.print(f"[red]{result.message}[/red]")
+                    
+                    # Handle special command results
+                    if result.data and "action" in result.data:
+                        if result.data["action"] == "clear_history":
+                            # Clear conversation history
+                            orchestrator.conversation_history = []
+                            if orchestrator.session:
+                                orchestrator.session.messages = []
+                                orchestrator.session_manager.save_session(orchestrator.session)
+                        elif result.data.get("new_model"):
+                            # Model was changed, update display
+                            new_model = result.data["new_model"]
+                            console.print(f"[dim]Now using: {provider_name} - {new_model}[/dim]")
+                    
+                    continue
+                else:
+                    console.print(f"[red]Unknown command: /{command_name}[/red]")
+                    console.print("Type [green]/help[/green] to see available commands.")
+                    continue
+
+            # Regular AI response
             console.print(
                 "\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
             response = await orchestrator.chat(user_input)
