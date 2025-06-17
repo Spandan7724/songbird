@@ -273,8 +273,6 @@ def main(
     ctx: typer.Context,
     provider: Optional[str] = typer.Option(
         None, "--provider", "-p", help="LLM provider to use (gemini, ollama)"),
-    model: Optional[str] = typer.Option(
-        None, "--model", "-m", help="Model to use"),
     list_providers: bool = typer.Option(
         False, "--list-providers", help="List available providers and exit"),
     continue_session: bool = typer.Option(
@@ -301,14 +299,13 @@ def main(
 
     if ctx.invoked_subcommand is None:
         # No subcommand provided, start chat session
-        chat(provider=provider, model=model,
+        chat(provider=provider,
              continue_session=continue_session, resume_session=resume_session)
 
 
 @app.command(hidden=True)
 def chat(
     provider: Optional[str] = None,
-    model: Optional[str] = None,
     continue_session: bool = False,
     resume_session: bool = False
 ) -> None:
@@ -332,7 +329,7 @@ def chat(
             session = session_manager.load_session(session.id)
             
             console.print(
-                f"\n[bold green]Continuing session from {format_time_ago(session.updated_at)}[/bold green]")
+                f"\n[cornflower_blue]Continuing session from {format_time_ago(session.updated_at)}[/cornflower_blue]")
             console.print(f"Summary: {session.summary}", style="dim")
 
             # Restore provider configuration from session
@@ -358,7 +355,7 @@ def chat(
                 session = session_manager.load_session(selected_session.id)
                 if session:
                     console.print(
-                        f"\n[bold green]Resuming session from {format_time_ago(session.updated_at)}[/bold green]")
+                        f"\n[cornflower_blue]Resuming session from {format_time_ago(session.updated_at)}[/cornflower_blue]")
                     console.print(f"Summary: {session.summary}", style="dim")
 
                     # Restore provider configuration from session
@@ -385,14 +382,14 @@ def chat(
     if not session:
         session = session_manager.create_session()
         console.print(
-            "\nWelcome to Songbird - Your AI coding companion!", style="bold green")
+            "\nWelcome to Songbird - Your AI coding companion!", style="cornflower_blue")
 
     console.print(
         "Available tools: file_search, file_read, file_create, file_edit, shell_exec", style="dim")
     console.print(
         "I can search, read, edit files with diffs, and run shell commands.", style="dim")
     console.print(
-        "Type '/' for commands, or 'exit' to quit.\n", style="dim")
+        "Type [spring_green1]'/'[/spring_green1] for commands, or [spring_green1]'exit'[/spring_green1] to quit.\n", style="dim")
 
     # Load command system
     command_registry = load_all_commands()
@@ -408,7 +405,7 @@ def chat(
         "gemini": "gemini-2.0-flash-exp",
         "ollama": "qwen2.5-coder:7b"
     }
-    model_name = restored_model or model or default_models.get(
+    model_name = restored_model or default_models.get(
         provider_name, "qwen2.5-coder:7b")
 
     # Save initial provider config to session (if we have a session)

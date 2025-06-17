@@ -26,23 +26,23 @@ class ClearCommand(BaseCommand):
         
         if not force:
             # Ask for confirmation
-            confirm = Confirm.ask("\n[yellow]Clear current conversation history?[/yellow]")
+            confirm = Confirm.ask("\n[white]Clear current conversation history? [cyan]\\[y/n][/cyan][/white]", show_choices=False)
             if not confirm:
                 return CommandResult(
                     success=True,
-                    message="Clear cancelled"
+                    message="[cornflower_blue]Clear cancelled[/cornflower_blue]"
                 )
         
         # Clear the screen
         self.console.clear()
         
         # Show a fresh banner or indication
-        self.console.print("[bold green]Conversation cleared![/bold green]")
-        self.console.print("[dim]Starting fresh conversation...[/dim]\n")
+        self.console.print("[cornflower_blue]Conversation cleared![/cornflower_blue]")
+        self.console.print("[dim]Starting fresh conversation...[dim]\n")
         
         return CommandResult(
             success=True,
-            message="Conversation history cleared",
+            message="[dim][cornflower_blue]Conversation history cleared[/cornflower_blue][/dim]",
             data={"action": "clear_history"},
             should_continue_conversation=False  # Signal to restart conversation
         )
