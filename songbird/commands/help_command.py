@@ -52,7 +52,7 @@ class HelpCommand(BaseCommand):
         # Create usage information
         usage_text = """
 [bold]Usage:[/bold]
-• Type [cornflower_blue]/[/cornflower_blue] to open the command selector
+• Type [cornflower_blue]/[/cornflower_blue] to show commands
 • Use [cornflower_blue]↑↓[/cornflower_blue] arrow keys to navigate
 • Press [cornflower_blue]Enter[/cornflower_blue] to select a command
 • Press [cornflower_blue]Esc[/cornflower_blue] to cancel

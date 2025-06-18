@@ -29,6 +29,7 @@ requires-python = ">=3.10"
 dependencies = [
     "appdirs>=1.4.4",
     "google-genai>=0.5.0",
+    "inquirerpy>=0.3.4",
     "ollama>=0.5.1",
     "rich>=13.7.1",
     "typer>=0.16.0",

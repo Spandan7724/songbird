@@ -237,6 +237,8 @@ async def file_create(file_path: str, content: str) -> Dict[str, Any]:
     Returns:
         Dictionary with operation result
     """
+    import asyncio
+    
     try:
         path = Path(file_path)
         
@@ -247,8 +249,13 @@ async def file_create(file_path: str, content: str) -> Dict[str, Any]:
                 "error": f"File already exists: {file_path}. Use file_edit to modify existing files."
             }
         
-        # Show preview of what will be created
+        # Print creation message immediately
         console.print(f"\n[bold green]Creating new file:[/bold green] {path}")
+        
+        # Small delay to ensure message is visible before file preview
+        await asyncio.sleep(0.05)
+        
+        # Show preview of what will be created
         syntax = Syntax(
             content,
             lexer=_get_lexer_from_filename(str(path)),
@@ -287,14 +294,13 @@ async def file_create(file_path: str, content: str) -> Dict[str, Any]:
         }
 
 
-async def apply_file_edit(file_path: str, new_content: str, create_backup: bool = True) -> Dict[str, Any]:
+async def apply_file_edit(file_path: str, new_content: str) -> Dict[str, Any]:
     """
     Actually apply the file edit after confirmation.
     
     Args:
         file_path: Path to file to edit
         new_content: New file content
-        create_backup: Whether to create .bak backup
         
     Returns:
         Dictionary with operation result
@@ -302,11 +308,6 @@ async def apply_file_edit(file_path: str, new_content: str, create_backup: bool 
     try:
         path = Path(file_path)
         file_existed = path.exists()
-        
-        # Create backup if requested and file exists
-        if create_backup and file_existed:
-            backup_path = path.with_suffix(path.suffix + '.bak')
-            backup_path.write_text(path.read_text(encoding='utf-8'), encoding='utf-8')
         
         # Ensure parent directory exists
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -318,8 +319,7 @@ async def apply_file_edit(file_path: str, new_content: str, create_backup: bool 
         return {
             "success": True,
             "file_path": str(path),
-            "message": f"File {'updated' if file_existed else 'created'} successfully",
-            "backup_created": create_backup and file_existed
+            "message": f"File {'updated' if file_existed else 'created'} successfully"
         }
         
     except Exception as e:
@@ -344,6 +344,9 @@ def _format_diff_preview(diff_lines: List[str]) -> str:
 
 def display_diff_preview(diff_preview: str, file_path: str):
     """Display a formatted diff preview with Rich."""
+    # Add spacing to prevent cutoff from status messages
+    console.print()
+    
     # Use Rich's Syntax for better diff display
     syntax = Syntax(
         diff_preview, 
