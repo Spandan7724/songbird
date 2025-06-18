@@ -452,10 +452,10 @@ def chat(
             else:
                 # User selected "Start new session"
                 console.print(
-                    "\n[bold green]Starting new session[/bold green]")
+                    "\n[cornflower_blue]Starting new session[/cornflower_blue]")
         else:
             console.print(
-                "\n[yellow]No previous sessions found. Starting new session.[/yellow]")
+                "\n[cornflower_blue]No previous sessions found. Starting new session.[/cornflower_blue]")
 
     # Create new session if not continuing/resuming
     if not session:

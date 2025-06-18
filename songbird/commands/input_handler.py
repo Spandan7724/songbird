@@ -89,7 +89,7 @@ class CommandInputHandler:
 
         # Create a simple table
         table = Table(show_header=False, box=None, padding=(0, 2))
-        table.add_column("Command", style="green")
+        table.add_column("Command", style="cornflower_blue")
         table.add_column("Description", style="dim")
 
         for cmd in sorted(commands, key=lambda x: x.name):
@@ -105,7 +105,7 @@ class CommandInputHandler:
         self.console.print()
         self.console.print(table)
         self.console.print(
-            "\n[dim]Type /help for detailed command information[/dim]")
+            "\n[dim]Type [spring_green1]/help[/spring_green1] for detailed command information[/dim]")
 
 
 # Alternative: Status line approach

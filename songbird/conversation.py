@@ -67,30 +67,29 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
 
     # Display prompt once
     console.print(f"\n{prompt}", style="bold white")
-    
-    # Track if we need to clear previous output
-    lines_to_clear = 0
-    
+    print()  
+    sys.stdout.write('\x1b7')  
+    print('\n' * len(options))    
+    sys.stdout.flush()
+    lines_to_clear = 0 
     def render():
         nonlocal lines_to_clear
-        
-        # Clear previous menu output
-        if lines_to_clear > 0:
-            # Move cursor up and clear lines
-            for _ in range(lines_to_clear):
-                sys.stdout.write('\x1b[1A')  # Move up one line
-                sys.stdout.write('\x1b[2K')  # Clear entire line
-            sys.stdout.write('\r')  # Return to start of line
-        
-        # Render options
+
+        # jump back to the anchor we saved with ESC 7 / restore ESC 8
+        sys.stdout.write('\x1b8')                       # ESC 8  – restore position
+
         for i, opt in enumerate(options):
+            sys.stdout.write('\x1b[2K\r')              # clear whole line
             if i == current:
-                sys.stdout.write(f"\x1b[1;36m▶ {opt}\x1b[0m\n")  # Cyan bold
+                sys.stdout.write("\x1b[1;36m▶ " + opt + "\x1b[0m")
             else:
-                sys.stdout.write(f"  {opt}\n")
-        
+                sys.stdout.write("  " + opt)
+            if i < len(options) - 1:                   # newline *between* rows only
+                sys.stdout.write('\n')
+
         sys.stdout.flush()
-        lines_to_clear = len(options)
+        lines_to_clear = len(options)                  # remember block height
+
 
     render()
 
