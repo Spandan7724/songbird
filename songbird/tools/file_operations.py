@@ -237,6 +237,8 @@ async def file_create(file_path: str, content: str) -> Dict[str, Any]:
     Returns:
         Dictionary with operation result
     """
+    import asyncio
+    
     try:
         path = Path(file_path)
         
@@ -247,8 +249,13 @@ async def file_create(file_path: str, content: str) -> Dict[str, Any]:
                 "error": f"File already exists: {file_path}. Use file_edit to modify existing files."
             }
         
-        # Show preview of what will be created
+        # Print creation message immediately
         console.print(f"\n[bold green]Creating new file:[/bold green] {path}")
+        
+        # Small delay to ensure message is visible before file preview
+        await asyncio.sleep(0.05)
+        
+        # Show preview of what will be created
         syntax = Syntax(
             content,
             lexer=_get_lexer_from_filename(str(path)),
