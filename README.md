@@ -64,13 +64,34 @@ songbird --provider ollama
 songbird --provider ollama --continue
 ```
 
-## Features\n\n### **Persistent Memory System** 🧠\n- **Session Persistence**: Automatic conversation saving with project-aware storage\n- **Seamless Continuation**: Resume exactly where you left off with `--continue`\n- **Session Browser**: Interactive menu to select from previous sessions with `--resume`\n- **Project Isolation**: Each git repository gets separate session storage\n- **Visual Replay**: Perfect restoration of conversation history with tool outputs\n\n### **Enhanced Search & Navigation** 🔍\n- **Smart File Search**: Type-specific search with `file_type` parameters (py, js, md, etc.)\n- **Glob Patterns**: Find files with patterns like `*.py`, `*test*.py`, `config.*`\n- **Rich Display**: Beautiful table output with file statistics and match counts\n- **Filename Detection**: Automatically detects filename vs content searches\n- **Cross-Platform**: Ripgrep integration with Python fallback
+## Features
+
+### **Persistent Memory System** 🧠
+- **Session Persistence**: Automatic conversation saving with project-aware storage
+- **Seamless Continuation**: Resume exactly where you left off with `--continue`
+- **Session Browser**: Interactive menu to select from previous sessions with `--resume`
+- **Project Isolation**: Each git repository gets separate session storage
+- **Visual Replay**: Perfect restoration of conversation history with tool outputs
+
+### **Enhanced Search & Navigation** 🔍
+- **Smart File Search**: Type-specific search with `file_type` parameters (py, js, md, etc.)
+- **Glob Patterns**: Find files with patterns like `*.py`, `*test*.py`, `config.*`
+- **Rich Display**: Beautiful table output with file statistics and match counts
+- **Filename Detection**: Automatically detects filename vs content searches
+- **Cross-Platform**: Ripgrep integration with Python fallback
+
+### **Dynamic Command System** ⚡
+- **In-Chat Commands**: Type `/` for instant command access without leaving conversation
+- **Real-Time Model Switching**: Change models with `/model` command - no session restart needed
+- **Model Persistence**: Model changes automatically save and restore across sessions
+- **Help System**: Comprehensive `/help` command with examples and documentation
+- **Session Management**: `/clear` command for conversation management
 
 ### **Flexible AI Options**
 - **Cloud AI**: Use Google's powerful Gemini models for best performance and latest features
 - **Local AI**: Run models locally with Ollama for privacy and offline use
 - **Multiple Models**: Support for Gemini 2.0 Flash, Qwen2.5-Coder, CodeLlama, and more
-- **Easy Switching**: Switch between providers with simple command flags
+- **Dynamic Switching**: Switch models instantly with in-chat `/model` commands
 
 ### **Developer Tools Integration**
 - **File Search**: Lightning-fast code search with ripgrep integration
@@ -202,15 +223,56 @@ songbird --provider ollama
 # List available providers
 songbird --list-providers
 
-# Use specific models
-songbird --provider gemini --model gemini-2.0-flash-001
-songbird --provider ollama --model qwen2.5-coder:7b
+# Session management
+songbird --continue    # Continue latest session
+songbird --resume      # Pick from previous sessions
 
 # Show available commands
 songbird --help
 
 # Display version
 songbird version
+```
+
+### In-Chat Commands
+
+Once in a conversation, use these powerful commands:
+
+```bash
+# Model switching (no session restart needed!)
+/model                    # See available models and switch interactively
+/model devstral:latest    # Switch to specific model directly
+/model gemini-2.0-flash-001  # Switch to Gemini model
+
+# Help and information
+/help                     # Show all available commands
+/help model               # Get help for specific command
+/                         # Quick command menu
+
+# Session management
+/clear                    # Clear conversation history
+/clear --force            # Clear without confirmation
+```
+
+### Example Conversation
+
+```
+You: Create a Python script that calculates fibonacci numbers
+
+Songbird: I'll create a Python script for calculating Fibonacci numbers...
+[Creates fibonacci.py with optimized implementation]
+
+You: /model devstral:latest
+Switched to model: devstral:latest
+
+You: Now optimize it for very large numbers
+
+Songbird: I'll optimize the Fibonacci script for large numbers using memoization...
+[Shows optimized version with performance improvements]
+
+You: /clear
+Clear current conversation history? [y/n]: y
+Conversation cleared!
 ```
 
 
