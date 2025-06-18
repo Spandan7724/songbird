@@ -22,6 +22,7 @@ from .conversation import ConversationOrchestrator, interactive_menu
 from .memory.manager import SessionManager
 from .memory.models import Session
 from .commands import CommandSelector, get_command_registry, CommandInputHandler
+from .memory.history_manager import MessageHistoryManager
 from .commands.loader import load_all_commands, is_command_input, parse_command_input
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich",
@@ -472,7 +473,15 @@ def chat(
     # Load command system
     command_registry = load_all_commands()
     command_selector = CommandSelector(command_registry, console)
-    command_input_handler = CommandInputHandler(command_registry, console)
+    
+    # Create session manager for history
+    session_manager = SessionManager(os.getcwd())
+    
+    # Create history manager (will be passed to input handler after orchestrator is created)
+    history_manager = MessageHistoryManager(session_manager)
+    
+    # Create input handler with history support
+    command_input_handler = CommandInputHandler(command_registry, console, history_manager)
 
     # Determine provider and model
     # Use restored values if available, otherwise use defaults
@@ -580,6 +589,9 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                                 orchestrator.session.messages = []
                                 orchestrator.session_manager.save_session(
                                     orchestrator.session)
+                            # Invalidate history cache since we cleared messages
+                            if command_input_handler.history_manager:
+                                command_input_handler.history_manager.invalidate_cache()
                         
                         if result.data.get("new_model"):
                             # Model was changed, update display and save to session
@@ -616,6 +628,11 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                     spinner_style="cornflower_blue",
                 ):
                     response = await orchestrator.chat(user_input)
+                    
+                # Invalidate history cache since we added a new user message
+                if command_input_handler.history_manager:
+                    command_input_handler.history_manager.invalidate_cache()
+                    
             finally:
                 _in_status = False
 

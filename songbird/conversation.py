@@ -65,23 +65,32 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
     console = Console()
     current = default_index
 
-    # Display prompt
+    # Display prompt once
     console.print(f"\n{prompt}", style="bold white")
-
-    # Initial render - create space for menu
-    print('\n' * len(options))
-
+    
+    # Track if we need to clear previous output
+    lines_to_clear = 0
+    
     def render():
-        # Move cursor up to start of menu
-        sys.stdout.write(f'\x1b[{len(options)}F')
+        nonlocal lines_to_clear
+        
+        # Clear previous menu output
+        if lines_to_clear > 0:
+            # Move cursor up and clear lines
+            for _ in range(lines_to_clear):
+                sys.stdout.write('\x1b[1A')  # Move up one line
+                sys.stdout.write('\x1b[2K')  # Clear entire line
+            sys.stdout.write('\r')  # Return to start of line
+        
+        # Render options
         for i, opt in enumerate(options):
             if i == current:
-                # Selected option with arrow and cornflower_blue color
-                sys.stdout.write(f"\x1b[1;38;5;75m▶ {opt}\x1b[0m\n")
+                sys.stdout.write(f"\x1b[1;36m▶ {opt}\x1b[0m\n")  # Cyan bold
             else:
-                # Normal option
                 sys.stdout.write(f"  {opt}\n")
+        
         sys.stdout.flush()
+        lines_to_clear = len(options)
 
     render()
 
@@ -92,49 +101,63 @@ def interactive_menu(prompt: str, options: List[str], default_index: int = 0) ->
             # If getch() fails (non-TTY environment), auto-select default
             if ch == '':
                 console.print(
-                    f"\nAuto-selected: {options[current]} (non-interactive environment)", style="yellow")
+                    f"\nAuto-selected: {options[current]} (non-interactive environment)", 
+                    style="yellow"
+                )
                 break
 
+            moved = False
+            
             if ch == '\x1b':  # Escape sequence (arrow keys) - Unix/Linux
                 try:
                     seq = getch() + getch()
                     if seq == '[A' and current > 0:  # Up arrow
                         current -= 1
-                    # Down arrow
-                    elif seq == '[B' and current < len(options) - 1:
+                        moved = True
+                    elif seq == '[B' and current < len(options) - 1:  # Down arrow
                         current += 1
+                        moved = True
                 except:
                     pass  # Ignore malformed escape sequences
             elif ch == '\x1b[A' and current > 0:  # Up (Windows-mapped)
                 current -= 1
-            # Down (Windows-mapped)
-            elif ch == '\x1b[B' and current < len(options) - 1:
+                moved = True
+            elif ch == '\x1b[B' and current < len(options) - 1:  # Down (Windows-mapped)
                 current += 1
-
+                moved = True
             elif ch in ('\r', '\n'):  # Enter
                 break
             elif ch in ('\x03', '\x04'):  # Ctrl+C or Ctrl+D
                 raise KeyboardInterrupt
             elif ch == 'w' and current > 0:  # w key (up)
                 current -= 1
+                moved = True
             elif ch == 's' and current < len(options) - 1:  # s key (down)
                 current += 1
+                moved = True
             elif ch.isdigit():  # Number keys for direct selection
                 idx = int(ch) - 1
                 if 0 <= idx < len(options):
                     current = idx
                     break
-
-            render()
+            
+            # Only re-render if selection changed
+            if moved:
+                render()
 
     except KeyboardInterrupt:
         console.print("\n\nCancelled by user", style="red")
         raise
 
+    # Clear the menu one more time before showing selection
+    if lines_to_clear > 0:
+        for _ in range(lines_to_clear):
+            sys.stdout.write('\x1b[1A\x1b[2K')
+        sys.stdout.write('\r')
+    
     # Show final selection
-    console.print(f"\nSelected: {options[current]}", style="bold cyan")
+    console.print(f"Selected: {options[current]}", style="bold cyan")
     return current
-
 
 class ConversationOrchestrator:
     """Orchestrates conversations between user, LLM, and tools."""
@@ -168,9 +191,24 @@ When users ask you to:
 - List files/folders → Use shell_exec with 'ls' or 'dir' 
 - Run scripts → Use shell_exec
 
+CRITICAL FILE CREATION RULES:
+- When creating files, ALWAYS generate appropriate filenames automatically based on the content/purpose
+- NEVER ask the user "What should the file be named?" - infer logical names from context
+- Use descriptive, conventional names: calculator.py, add_numbers.cpp, circle_area.py, etc.
+- Match file extensions to the programming language/content type
+- If the user specifies a filename, use it; otherwise generate one immediately
+
 ALWAYS use the appropriate tool when asked to perform file operations or terminal commands. Never say you cannot do something that these tools enable.
 
-When editing files, go straight to using file_edit - the tool will show the diff automatically."""
+When editing files, go straight to using file_edit - the tool will show the diff automatically.
+
+RESPONSE FORMATTING GUIDELINES:
+- When displaying code content, always wrap it in proper markdown code blocks with language specification
+- Use clear, concise language in responses
+- Structure information with headers, bullet points, and proper spacing
+- When showing file contents, provide context about what the file does
+- Keep responses focused and avoid unnecessary repetition
+- Use appropriate technical terminology but explain complex concepts clearly"""
 
         # Initialize conversation history
         if self.session and self.session.messages:
@@ -694,8 +732,7 @@ When editing files, go straight to using file_edit - the tool will show the diff
                 # Apply the edit
                 apply_result = await apply_file_edit(
                     arguments["file_path"],
-                    arguments["new_content"],
-                    arguments.get("create_backup", True)
+                    arguments["new_content"]
                 )
 
                 if apply_result["success"]:
