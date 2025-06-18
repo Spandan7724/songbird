@@ -65,8 +65,8 @@ class ModelCommand(BaseCommand):
         # Display models with numbers
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column("", style="white")  # Number
-        table.add_column("Model", style="green")
-        table.add_column("", style="blue")  # Current indicator
+        table.add_column("Model", style="spring_green1")
+        table.add_column("", style="dim")  # Current indicator
 
         for i, model in enumerate(models, 1):
             current = "← current" if model == current_model else ""
@@ -84,7 +84,7 @@ class ModelCommand(BaseCommand):
         if not choice:
             return CommandResult(
                 success=True,
-                message="Model selection cancelled"
+                message="[white dim]Model selection cancelled[/white dim]",
             )
 
         try:

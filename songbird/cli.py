@@ -2,12 +2,17 @@
 from __future__ import annotations
 import asyncio
 import os
+import signal
+import sys
+import time
+from threading import Timer
 from typing import Optional
 from datetime import datetime
 import json
 import typer
 from rich.console import Console
 from rich.prompt import Prompt
+from rich.status import Status
 from rich.table import Table
 from rich.panel import Panel
 from rich.syntax import Syntax
@@ -23,7 +28,80 @@ app = typer.Typer(add_completion=False, rich_markup_mode="rich",
                   help="Songbird - Terminal-first AI coding companion", no_args_is_help=False)
 console = Console()
 
+# ------------------------------------------------------------------ #
+#  Ctrl-C double-tap guard (global)
+# ------------------------------------------------------------------ #
+_GRACE = 2.0           # seconds between taps
+_last = None           # time of previous SIGINT
+_cleanup_timer = None  # track active cleanup timer for resource safety
+_in_status = False     # track if we're in a status/thinking state
 
+def _flash_notice():
+    global _cleanup_timer
+    # Cancel any existing cleanup timer to prevent accumulation
+    if _cleanup_timer:
+        _cleanup_timer.cancel()
+    
+    # If we're in status mode, use console.print instead of raw output
+    if _in_status:
+        # Don't try to manipulate cursor during status
+        return
+    
+    # Normal mode - use ANSI escape sequences
+    sys.stdout.write("\033[s")  # Save cursor position
+    sys.stdout.write("\033[A")  # Move up one line
+    sys.stdout.write("\r\033[2K")  # Clear that line
+    sys.stdout.write("\033[90mPress Ctrl+C again to exit\033[0m")  # Gray notice
+    sys.stdout.write("\033[u")  # Restore cursor position
+    sys.stdout.flush()
+    
+    # Schedule cleanup: clear the notice line above
+    def _clear():
+        if not _in_status:
+            sys.stdout.write("\033[s")  # Save cursor position
+            sys.stdout.write("\033[A")  # Move up one line
+            sys.stdout.write("\r\033[2K")  # Clear that line
+            sys.stdout.write("\033[u")  # Restore cursor position
+            sys.stdout.flush()
+        
+    _cleanup_timer = Timer(_GRACE, _clear)
+    _cleanup_timer.start()
+
+def _sigint(signum, frame):
+    global _last, _cleanup_timer
+    now = time.monotonic()
+
+    if _last and (now - _last) < _GRACE:          # second tap → quit
+        # Cancel any pending cleanup timer before exit
+        if _cleanup_timer:
+            _cleanup_timer.cancel()
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        
+        if _in_status:
+            # Force stop the status if active
+            console.print("\n[red]Interrupted![/red]")
+        else:
+            # Clear the notice line if it exists
+            sys.stdout.write("\033[A\r\033[2K\033[B")  # Up, clear, down
+        
+        print()  # Clean newline before exit
+        raise KeyboardInterrupt
+
+    # First tap handling
+    if _in_status:
+        # During status/thinking, just show a console message
+        console.print("\n[dim]Press Ctrl+C again to exit[/dim]")
+    else:
+        # Normal input mode - erase ^C and show notice
+        sys.stdout.write("\b\b  \b\b")  # Backspace over ^C
+        sys.stdout.flush()
+        _flash_notice()
+    
+    _last = now               # start grace window
+
+# Register the signal handler
+signal.signal(signal.SIGINT, _sigint)
+# ------------------------------------------------------------------ #
 def show_banner():
     """Display the Songbird ASCII banner in blue."""
     banner = """
@@ -527,18 +605,28 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                         "Type [green]/help[/green] to see available commands.")
                     continue
 
-            # Regular AI response
-            console.print(
-                "\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
-            response = await orchestrator.chat(user_input)
+            # Set status flag for signal handler
+            global _in_status
+            _in_status = True
 
-            # Clear the "thinking..." line and display response
-            console.print(
-                f"\r[medium_spring_green]Songbird[/medium_spring_green]: {response}")
+            try:
+                with console.status(
+                    "[dim]Songbird (thinking…)[/dim]",         
+                    spinner="dots",                
+                    spinner_style="cornflower_blue",
+                ):
+                    response = await orchestrator.chat(user_input)
+            finally:
+                _in_status = False
 
+            # Display response
+            console.print(f"[medium_spring_green]Songbird[/medium_spring_green]: {response}")
+    
         except KeyboardInterrupt:
-            console.print("\n\nGoodbye!", style="bold blue")
+            # Signal handler ensures this only fires on confirmed double-tap
+            console.print("\nGoodbye!", style="bold blue")
             break
+                
         except Exception as e:
             console.print(f"\nError: {e}", style="red")
 
