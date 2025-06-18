@@ -1,7 +1,6 @@
 # songbird/commands/input_handler.py
 """
-Simple, reliable input handler for Songbird commands.
-No terminal complexity, just clean text input that works everywhere.
+Enhanced input handler for Songbird commands with message history support.
 """
 
 from typing import Optional, List
@@ -9,23 +8,27 @@ from rich.console import Console
 from rich.table import Table
 from .base import BaseCommand
 from .registry import CommandRegistry
+from .enhanced_input import get_input_with_history
+from ..memory.history_manager import MessageHistoryManager
 
 
 # Enhanced input handler that can show current model in prompt
 
 class CommandInputHandler:
-    """Simple text-based input handler with model awareness."""
+    """Enhanced input handler with model awareness and message history."""
 
-    def __init__(self, registry: CommandRegistry, console: Console):
+    def __init__(self, registry: CommandRegistry, console: Console, history_manager: Optional[MessageHistoryManager] = None):
         self.registry = registry
         self.console = console
+        self.history_manager = history_manager
         self.show_model_in_prompt = False  # Can be toggled
 
     def get_input_with_commands(self, prompt: str = "You", context: dict = None) -> str:
         """
-        Get user input with command support.
+        Get user input with command support and message history navigation.
         Shows help when user types just '/'.
         Can optionally show current model in prompt.
+        Supports up/down arrow keys for message history (when available).
         """
         # Build prompt with optional model info
         if self.show_model_in_prompt and context:
@@ -39,9 +42,9 @@ class CommandInputHandler:
         else:
             prompt_text = prompt
 
-        # Get input
-        self.console.print(f"\n[bold cyan]{prompt_text}[/bold cyan]: ", end="")
-        user_input = input().strip()
+        # Get input with history support
+        self.console.print("\n", end="")
+        user_input = get_input_with_history(prompt_text, self.history_manager, self.console)
 
         # Handle special cases
         if user_input == "/":
@@ -86,7 +89,7 @@ class CommandInputHandler:
 
         # Create a simple table
         table = Table(show_header=False, box=None, padding=(0, 2))
-        table.add_column("Command", style="green")
+        table.add_column("Command", style="cornflower_blue")
         table.add_column("Description", style="dim")
 
         for cmd in sorted(commands, key=lambda x: x.name):
@@ -102,7 +105,7 @@ class CommandInputHandler:
         self.console.print()
         self.console.print(table)
         self.console.print(
-            "\n[dim]Type /help for detailed command information[/dim]")
+            "\n[dim]Type [spring_green1]/help[/spring_green1] for detailed command information[/dim]")
 
 
 # Alternative: Status line approach

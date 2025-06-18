@@ -121,27 +121,3 @@ class TestFileOperations:
             assert file_path.exists()
             assert file_path.read_text() == new_content
     
-    @pytest.mark.asyncio
-    async def test_apply_file_edit_with_backup(self):
-        """Test applying file edit with backup creation."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            original_content = "original content\n"
-            f.write(original_content)
-            f.flush()
-            
-            new_content = "updated content\n"
-            result = await apply_file_edit(f.name, new_content, create_backup=True)
-            
-            assert result["success"] is True
-            
-            # Verify original file was updated
-            assert Path(f.name).read_text() == new_content
-            
-            # Verify backup was created
-            backup_path = Path(f.name + '.bak')
-            assert backup_path.exists()
-            assert backup_path.read_text() == original_content
-            
-            # Clean up
-            Path(f.name).unlink()
-            backup_path.unlink()

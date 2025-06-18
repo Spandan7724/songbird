@@ -9,6 +9,9 @@ import sys
 from typing import List, Dict, Any, Optional
 from rich.console import Console
 from rich.prompt import Confirm
+from rich.live import Live
+from rich.table import Table
+from InquirerPy import inquirer
 from .llm.providers import BaseProvider
 from .tools.executor import ToolExecutor
 from .tools.registry import get_tool_schemas
@@ -17,124 +20,30 @@ from .memory.models import Session, Message
 from .memory.manager import SessionManager
 
 
-def getch():
-    """Get a single character from stdin, cross-platform."""
-    if os.name == 'nt':  # Windows
-        import msvcrt
-        ch1 = msvcrt.getch()
-        if ch1 in (b'\x00', b'\xe0'):          # arrow / function key prefix
-            ch2 = msvcrt.getch()
-            if ch2 == b'H':                    # Up
-                return '\x1b[A'
-            elif ch2 == b'P':                  # Down
-                return '\x1b[B'
-            else:
-                return ''                      # ignore other keys
-        return ch1.decode('utf-8', 'ignore')
-    else:  # Unix/Linux/macOS
-        # Check if stdin is a TTY
-        if not sys.stdin.isatty():
-            return ''  # Fallback for non-TTY environments
-
-        import tty
-        import termios
-        try:
-            fd = sys.stdin.fileno()
-            old = termios.tcgetattr(fd)
-            try:
-                tty.setraw(fd)
-                return sys.stdin.read(1)
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        except:
-            return ''  # Fallback on any termios error
-
-
-def interactive_menu(prompt: str, options: List[str], default_index: int = 0) -> int:
+async def safe_interactive_menu(prompt: str, options: list[str], default_index: int = 0) -> int | None:
     """
-    Display an interactive menu with arrow key navigation.
-    
-    Args:
-        prompt: The question/prompt to display
-        options: List of menu options
-        default_index: Index of the default selected option
-        
-    Returns:
-        Index of the selected option
+    Async, up/down arrow-key menu with graceful Ctrl+C handling.
+    Returns the selected index, or None if cancelled.
     """
-    console = Console()
-    current = default_index
-
-    # Display prompt
-    console.print(f"\n{prompt}", style="bold white")
-
-    # Initial render - create space for menu
-    print('\n' * len(options))
-
-    def render():
-        # Move cursor up to start of menu
-        sys.stdout.write(f'\x1b[{len(options)}F')
-        for i, opt in enumerate(options):
-            if i == current:
-                # Selected option with arrow and cornflower_blue color
-                sys.stdout.write(f"\x1b[1;38;5;75m▶ {opt}\x1b[0m\n")
-            else:
-                # Normal option
-                sys.stdout.write(f"  {opt}\n")
-        sys.stdout.flush()
-
-    render()
-
     try:
-        while True:
-            ch = getch()
-
-            # If getch() fails (non-TTY environment), auto-select default
-            if ch == '':
-                console.print(
-                    f"\nAuto-selected: {options[current]} (non-interactive environment)", style="yellow")
-                break
-
-            if ch == '\x1b':  # Escape sequence (arrow keys) - Unix/Linux
-                try:
-                    seq = getch() + getch()
-                    if seq == '[A' and current > 0:  # Up arrow
-                        current -= 1
-                    # Down arrow
-                    elif seq == '[B' and current < len(options) - 1:
-                        current += 1
-                except:
-                    pass  # Ignore malformed escape sequences
-            elif ch == '\x1b[A' and current > 0:  # Up (Windows-mapped)
-                current -= 1
-            # Down (Windows-mapped)
-            elif ch == '\x1b[B' and current < len(options) - 1:
-                current += 1
-
-            elif ch in ('\r', '\n'):  # Enter
-                break
-            elif ch in ('\x03', '\x04'):  # Ctrl+C or Ctrl+D
-                raise KeyboardInterrupt
-            elif ch == 'w' and current > 0:  # w key (up)
-                current -= 1
-            elif ch == 's' and current < len(options) - 1:  # s key (down)
-                current += 1
-            elif ch.isdigit():  # Number keys for direct selection
-                idx = int(ch) - 1
-                if 0 <= idx < len(options):
-                    current = idx
-                    break
-
-            render()
-
+        return await asyncio.to_thread(
+            interactive_menu,
+            prompt,
+            options,
+            default_index
+        )
     except KeyboardInterrupt:
-        console.print("\n\nCancelled by user", style="red")
-        raise
+        print("\nOperation cancelled by user.")
+        return None
 
-    # Show final selection
-    console.print(f"\nSelected: {options[current]}", style="bold cyan")
-    return current
-
+def interactive_menu(prompt: str, options: list[str], default_index: int = 0) -> int:
+    """Synchronous up/down menu, returns index of selected item."""
+    result = inquirer.select(
+        message=prompt,
+        choices=options,
+        default=options[default_index] if 0 <= default_index < len(options) else options[0]
+    ).execute()
+    return options.index(result)
 
 class ConversationOrchestrator:
     """Orchestrates conversations between user, LLM, and tools."""
@@ -145,6 +54,7 @@ class ConversationOrchestrator:
         self.conversation_history: List[Dict[str, Any]] = []
         self.session = session
         self.session_manager = SessionManager(working_directory)
+        self._current_status = None  # Track current status object
 
         # Add system prompt to guide the LLM
         self.system_prompt = """You are Songbird, an AI coding assistant with access to powerful tools for interacting with the file system and terminal.
@@ -168,9 +78,24 @@ When users ask you to:
 - List files/folders → Use shell_exec with 'ls' or 'dir' 
 - Run scripts → Use shell_exec
 
+CRITICAL FILE CREATION RULES:
+- When creating files, ALWAYS generate appropriate filenames automatically based on the content/purpose
+- NEVER ask the user "What should the file be named?" - infer logical names from context
+- Use descriptive, conventional names: calculator.py, add_numbers.cpp, circle_area.py, etc.
+- Match file extensions to the programming language/content type
+- If the user specifies a filename, use it; otherwise generate one immediately
+
 ALWAYS use the appropriate tool when asked to perform file operations or terminal commands. Never say you cannot do something that these tools enable.
 
-When editing files, go straight to using file_edit - the tool will show the diff automatically."""
+When editing files, go straight to using file_edit - the tool will show the diff automatically.
+
+RESPONSE FORMATTING GUIDELINES:
+- When displaying code content, always wrap it in proper markdown code blocks with language specification
+- Use clear, concise language in responses
+- Structure information with headers, bullet points, and proper spacing
+- When showing file contents, provide context about what the file does
+- Keep responses focused and avoid unnecessary repetition
+- Use appropriate technical terminology but explain complex concepts clearly"""
 
         # Initialize conversation history
         if self.session and self.session.messages:
@@ -206,16 +131,19 @@ When editing files, go straight to using file_edit - the tool will show the diff
 
             self.conversation_history.append(hist_msg)
 
-    async def chat(self, message: str) -> str:
+    async def chat(self, message: str, status=None) -> str:
         """
         Send a message and handle any tool calls with multi-turn conversation.
         
         Args:
             message: User message
+            status: Optional Rich Status object to stop before tool execution
             
         Returns:
             Final response content
         """
+        # Store the status object
+        self._current_status = status
         # Add user message to history
         self.conversation_history.append({
             "role": "user",
@@ -240,6 +168,11 @@ When editing files, go straight to using file_edit - the tool will show the diff
 
         # Handle tool calls if any
         if response.tool_calls:
+            # CRITICAL: Stop status before any tool execution
+            if self._current_status:
+                self._current_status.stop()
+                await asyncio.sleep(0.1)  # Ensure clean terminal state
+            
             # Execute tool calls
             tool_results = []
             for i, tool_call in enumerate(response.tool_calls):
@@ -674,6 +607,11 @@ When editing files, go straight to using file_edit - the tool will show the diff
                     }
                 }
 
+            # Ensure status is stopped if it exists
+            if hasattr(self, '_current_status') and self._current_status:
+                self._current_status.stop()
+                await asyncio.sleep(0.1)
+
             # Display the diff preview
             display_diff_preview(
                 edit_result["diff_preview"], edit_result["file_path"])
@@ -682,20 +620,27 @@ When editing files, go straight to using file_edit - the tool will show the diff
             if os.getenv("SONGBIRD_AUTO_APPLY") == "y":
                 user_confirmed = True
             else:
-                selected_index = await asyncio.to_thread(
-                    interactive_menu,
+                selected_index = await safe_interactive_menu(
                     "Apply these changes?",
                     ["Yes", "No"],
                     default_index=0
                 )
+                if selected_index is None:
+                    # Handle cancellation 
+                    return {
+                        "success": False,
+                        "result": {
+                            "success": False,
+                            "message": "Changes cancelled by user"
+                        }
+                    }
                 user_confirmed = (selected_index == 0)
 
             if user_confirmed:
                 # Apply the edit
                 apply_result = await apply_file_edit(
                     arguments["file_path"],
-                    arguments["new_content"],
-                    arguments.get("create_backup", True)
+                    arguments["new_content"]
                 )
 
                 if apply_result["success"]:

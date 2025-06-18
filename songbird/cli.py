@@ -13,15 +13,18 @@ import typer
 from rich.console import Console
 from rich.prompt import Prompt
 from rich.status import Status
+from rich.live import Live
+from rich.table import Table
 from rich.table import Table
 from rich.panel import Panel
 from rich.syntax import Syntax
 from . import __version__
 from .llm.providers import get_provider, list_available_providers, get_default_provider
-from .conversation import ConversationOrchestrator, interactive_menu
+from .conversation import ConversationOrchestrator, safe_interactive_menu
 from .memory.manager import SessionManager
 from .memory.models import Session
 from .commands import CommandSelector, get_command_registry, CommandInputHandler
+from .memory.history_manager import MessageHistoryManager
 from .commands.loader import load_all_commands, is_command_input, parse_command_input
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich",
@@ -132,40 +135,52 @@ def format_time_ago(dt: datetime) -> str:
         return "just now"
 
 
-def display_session_selector(sessions: list[Session]) -> Optional[Session]:
-    """Display an interactive session selector and return the selected session."""
+async def display_session_selector(sessions: list[Session]) -> Optional[Session]:
+    """Display an interactive session selector with better terminal handling."""
     if not sessions:
         console.print("No previous sessions found.", style="yellow")
         return None
 
     # Sort sessions by updated_at descending
     sessions.sort(key=lambda s: s.updated_at, reverse=True)
-
-    # Prepare options for interactive menu
+    
+    # Limit sessions to avoid terminal overflow
+    max_sessions = min(30, console.height - 10 if console.height > 10 else 20)
+    display_sessions = sessions[:max_sessions]
+    
+    # Prepare options
     options = []
-    for session in sessions:
+    for session in display_sessions:
         created = format_time_ago(session.created_at)
         modified = format_time_ago(session.updated_at)
         msg_count = len(session.messages)
-        summary = session.summary or "Empty session"
-
-        # Format: "Modified: 2h ago | Created: 3d ago | 15 messages | Working on auth feature"
-        option = f"Modified: {modified} | Created: {created} | {msg_count} msgs | {summary}"
+        summary = (session.summary or "Empty session")[:50]
+        if len(session.summary or "") > 50:
+            summary += "..."
+        
+        option = f"{modified} | {created} | {msg_count} msgs | {summary}"
         options.append(option)
-
+    
     options.append("Start new session")
-
+    
+    if len(sessions) > max_sessions:
+        console.print(f"[yellow]Showing {max_sessions} most recent sessions out of {len(sessions)} total[/yellow]\n")
+    
     # Use interactive menu
-    selected_idx = interactive_menu(
+    selected_idx = await safe_interactive_menu(
         "Select a session to resume:",
         options,
         default_index=0
     )
-
-    if selected_idx == len(sessions):  # "Start new session" selected
+    
+    if selected_idx is None:
+        # User cancelled, return None to indicate cancellation
         return None
-
-    return sessions[selected_idx]
+    
+    if selected_idx == len(display_sessions):
+        return None
+        
+    return display_sessions[selected_idx]
 
 
 def replay_conversation(session: Session):
@@ -428,7 +443,7 @@ def chat(
     elif resume_session:
         sessions = session_manager.list_sessions()
         if sessions:
-            selected_session = display_session_selector(sessions)
+            selected_session = asyncio.run(display_session_selector(sessions))
             if selected_session:
                 session = session_manager.load_session(selected_session.id)
                 if session:
@@ -451,10 +466,10 @@ def chat(
             else:
                 # User selected "Start new session"
                 console.print(
-                    "\n[bold green]Starting new session[/bold green]")
+                    "\n[cornflower_blue]Starting new session[/cornflower_blue]")
         else:
             console.print(
-                "\n[yellow]No previous sessions found. Starting new session.[/yellow]")
+                "\n[cornflower_blue]No previous sessions found. Starting new session.[/cornflower_blue]")
 
     # Create new session if not continuing/resuming
     if not session:
@@ -472,7 +487,15 @@ def chat(
     # Load command system
     command_registry = load_all_commands()
     command_selector = CommandSelector(command_registry, console)
-    command_input_handler = CommandInputHandler(command_registry, console)
+    
+    # Create session manager for history
+    session_manager = SessionManager(os.getcwd())
+    
+    # Create history manager (will be passed to input handler after orchestrator is created)
+    history_manager = MessageHistoryManager(session_manager)
+    
+    # Create input handler with history support
+    command_input_handler = CommandInputHandler(command_registry, console, history_manager)
 
     # Determine provider and model
     # Use restored values if available, otherwise use defaults
@@ -534,21 +557,21 @@ def chat(
 
 async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                      command_input_handler, provider_name: str, provider_instance):
-    """Run the interactive chat loop."""
-
+    """Run the interactive chat loop with improved status handling."""
+    
     while True:
         try:
-            # Get user input with command support
+            # Get user input
             user_input = command_input_handler.get_input_with_commands("You")
-
+            
             if user_input.lower() in ["exit", "quit", "bye"]:
                 console.print("\nGoodbye!", style="bold blue")
                 break
-
+                
             if not user_input.strip():
                 continue
-
-            # Handle command input
+                
+            # Handle commands
             if is_command_input(user_input):
                 command_name, args = parse_command_input(user_input)
                 command = command_registry.get_command(command_name)
@@ -580,6 +603,9 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                                 orchestrator.session.messages = []
                                 orchestrator.session_manager.save_session(
                                     orchestrator.session)
+                            # Invalidate history cache since we cleared messages
+                            if command_input_handler.history_manager:
+                                command_input_handler.history_manager.invalidate_cache()
                         
                         if result.data.get("new_model"):
                             # Model was changed, update display and save to session
@@ -604,29 +630,41 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                     console.print(
                         "Type [green]/help[/green] to see available commands.")
                     continue
-
-            # Set status flag for signal handler
+            
+            # Process with LLM
             global _in_status
             _in_status = True
-
+            
+            # Create and manage status properly
+            status = Status(
+                "[dim]Songbird (thinking…)[/dim]",
+                console=console,
+                spinner="dots",
+                spinner_style="cornflower_blue"
+            )
+            
+            response = None
             try:
-                with console.status(
-                    "[dim]Songbird (thinking…)[/dim]",         
-                    spinner="dots",                
-                    spinner_style="cornflower_blue",
-                ):
-                    response = await orchestrator.chat(user_input)
+                status.start()
+                response = await orchestrator.chat(user_input, status=status)
             finally:
+                # Always stop status
+                status.stop()
                 _in_status = False
-
-            # Display response
-            console.print(f"[medium_spring_green]Songbird[/medium_spring_green]: {response}")
-    
+                # Small delay for clean output
+                await asyncio.sleep(0.05)
+            
+            # Display response with proper spacing
+            if response:
+                console.print(f"[medium_spring_green]Songbird[/medium_spring_green]: {response}")
+                
+            # Invalidate history cache
+            if command_input_handler.history_manager:
+                command_input_handler.history_manager.invalidate_cache()
+                
         except KeyboardInterrupt:
-            # Signal handler ensures this only fires on confirmed double-tap
             console.print("\nGoodbye!", style="bold blue")
             break
-                
         except Exception as e:
             console.print(f"\nError: {e}", style="red")
 
