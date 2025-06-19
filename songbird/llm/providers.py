@@ -36,6 +36,24 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+
+try:
+    import httpx
+    HTTPX_AVAILABLE = True
+except ImportError:
+    HTTPX_AVAILABLE = False
+
 from .types import ChatResponse
 
 
@@ -116,6 +134,389 @@ class OllamaProvider(BaseProvider):
             raise ConnectionError(f"Ollama error: {e.error}")
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Ollama: {e}")
+
+
+class OpenAIProvider(BaseProvider):
+    """OpenAI provider using official OpenAI Python client."""
+    
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o", base_url: Optional[str] = None):
+        if not OPENAI_AVAILABLE:
+            raise ImportError("openai package not installed. Run: pip install openai")
+        
+        self.model = model
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        
+        if not self.api_key:
+            raise ValueError("OpenAI API key required. Set OPENAI_API_KEY environment variable or pass api_key parameter")
+        
+        # Initialize the OpenAI client
+        client_kwargs = {"api_key": self.api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        
+        self.client = openai.OpenAI(**client_kwargs)
+    
+    def _convert_tools_to_openai_format(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert Songbird tool schemas to OpenAI function format."""
+        openai_tools = []
+        
+        for tool in tools:
+            if tool["type"] == "function":
+                # OpenAI format is already compatible with our tool schema
+                openai_tools.append(tool)
+        
+        return openai_tools
+    
+    def _convert_openai_response_to_songbird(self, response) -> ChatResponse:
+        """Convert OpenAI response to Songbird ChatResponse format."""
+        choice = response.choices[0]
+        message = choice.message
+        
+        content = message.content or ""
+        
+        # Convert tool calls if present
+        tool_calls = None
+        if message.tool_calls:
+            tool_calls = []
+            for tool_call in message.tool_calls:
+                tool_calls.append({
+                    "id": tool_call.id,
+                    "function": {
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments
+                    }
+                })
+        
+        # Convert usage information
+        usage_dict = None
+        if response.usage:
+            usage_dict = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+        
+        return ChatResponse(
+            content=content,
+            model=response.model,
+            usage=usage_dict,
+            tool_calls=tool_calls
+        )
+    
+    def chat(self, message: str, tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+        """Send a chat message to OpenAI."""
+        try:
+            chat_kwargs = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": message}]
+            }
+            
+            # Add tools if provided
+            if tools:
+                openai_tools = self._convert_tools_to_openai_format(tools)
+                chat_kwargs["tools"] = openai_tools
+                chat_kwargs["tool_choice"] = "auto"
+            
+            response = self.client.chat.completions.create(**chat_kwargs)
+            
+            return self._convert_openai_response_to_songbird(response)
+            
+        except openai.AuthenticationError:
+            raise ValueError("Invalid OpenAI API key")
+        except openai.RateLimitError:
+            raise ConnectionError("OpenAI rate limit exceeded")
+        except openai.APIError as e:
+            raise ConnectionError(f"OpenAI API error: {e}")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to OpenAI: {e}")
+    
+    def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+        """Send a conversation with multiple messages to OpenAI."""
+        try:
+            chat_kwargs = {
+                "model": self.model,
+                "messages": messages
+            }
+            
+            # Add tools if provided
+            if tools:
+                openai_tools = self._convert_tools_to_openai_format(tools)
+                chat_kwargs["tools"] = openai_tools
+                chat_kwargs["tool_choice"] = "auto"
+            
+            response = self.client.chat.completions.create(**chat_kwargs)
+            
+            return self._convert_openai_response_to_songbird(response)
+            
+        except openai.AuthenticationError:
+            raise ValueError("Invalid OpenAI API key")
+        except openai.RateLimitError:
+            raise ConnectionError("OpenAI rate limit exceeded")
+        except openai.APIError as e:
+            raise ConnectionError(f"OpenAI API error: {e}")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to OpenAI: {e}")
+
+
+class ClaudeProvider(BaseProvider):
+    """Anthropic Claude provider using official Anthropic Python client."""
+    
+    def __init__(self, api_key: Optional[str] = None, model: str = "claude-3-5-sonnet-20241022"):
+        if not ANTHROPIC_AVAILABLE:
+            raise ImportError("anthropic package not installed. Run: pip install anthropic")
+        
+        self.model = model
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        
+        if not self.api_key:
+            raise ValueError("Anthropic API key required. Set ANTHROPIC_API_KEY environment variable or pass api_key parameter")
+        
+        # Initialize the Anthropic client
+        self.client = anthropic.Anthropic(api_key=self.api_key)
+    
+    def _convert_tools_to_anthropic_format(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert Songbird tool schemas to Anthropic format."""
+        anthropic_tools = []
+        
+        for tool in tools:
+            if tool["type"] == "function":
+                func_info = tool["function"]
+                anthropic_tools.append({
+                    "name": func_info["name"],
+                    "description": func_info["description"],
+                    "input_schema": func_info.get("parameters", {})
+                })
+        
+        return anthropic_tools
+    
+    def _convert_anthropic_response_to_songbird(self, response) -> ChatResponse:
+        """Convert Anthropic response to Songbird ChatResponse format."""
+        # Extract text content
+        content = ""
+        tool_calls = None
+        
+        if hasattr(response, 'content') and response.content:
+            tool_calls = []
+            for block in response.content:
+                if hasattr(block, 'type'):
+                    if block.type == "text":
+                        content += block.text
+                    elif block.type == "tool_use":
+                        tool_calls.append({
+                            "id": block.id,
+                            "function": {
+                                "name": block.name,
+                                "arguments": block.input
+                            }
+                        })
+            
+            if not tool_calls:
+                tool_calls = None
+        
+        # Convert usage information
+        usage_dict = None
+        if hasattr(response, 'usage') and response.usage:
+            usage_dict = {
+                "prompt_tokens": response.usage.input_tokens,
+                "completion_tokens": response.usage.output_tokens,
+                "total_tokens": response.usage.input_tokens + response.usage.output_tokens
+            }
+        
+        return ChatResponse(
+            content=content,
+            model=response.model if hasattr(response, 'model') else self.model,
+            usage=usage_dict,
+            tool_calls=tool_calls
+        )
+    
+    def chat(self, message: str, tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+        """Send a chat message to Claude."""
+        try:
+            message_kwargs = {
+                "model": self.model,
+                "max_tokens": 4096,
+                "messages": [{"role": "user", "content": message}]
+            }
+            
+            # Add tools if provided
+            if tools:
+                anthropic_tools = self._convert_tools_to_anthropic_format(tools)
+                message_kwargs["tools"] = anthropic_tools
+            
+            response = self.client.messages.create(**message_kwargs)
+            
+            return self._convert_anthropic_response_to_songbird(response)
+            
+        except anthropic.AuthenticationError:
+            raise ValueError("Invalid Anthropic API key")
+        except anthropic.RateLimitError:
+            raise ConnectionError("Anthropic rate limit exceeded")
+        except anthropic.APIError as e:
+            raise ConnectionError(f"Anthropic API error: {e}")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Claude: {e}")
+    
+    def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+        """Send a conversation with multiple messages to Claude."""
+        try:
+            # Filter out system messages and combine them into a system parameter
+            system_messages = []
+            chat_messages = []
+            
+            for msg in messages:
+                if msg["role"] == "system":
+                    system_messages.append(msg["content"])
+                else:
+                    chat_messages.append(msg)
+            
+            message_kwargs = {
+                "model": self.model,
+                "max_tokens": 4096,
+                "messages": chat_messages
+            }
+            
+            # Add system message if present
+            if system_messages:
+                message_kwargs["system"] = "\n\n".join(system_messages)
+            
+            # Add tools if provided
+            if tools:
+                anthropic_tools = self._convert_tools_to_anthropic_format(tools)
+                message_kwargs["tools"] = anthropic_tools
+            
+            response = self.client.messages.create(**message_kwargs)
+            
+            return self._convert_anthropic_response_to_songbird(response)
+            
+        except anthropic.AuthenticationError:
+            raise ValueError("Invalid Anthropic API key")
+        except anthropic.RateLimitError:
+            raise ConnectionError("Anthropic rate limit exceeded")
+        except anthropic.APIError as e:
+            raise ConnectionError(f"Anthropic API error: {e}")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Claude: {e}")
+
+
+class OpenRouterProvider(BaseProvider):
+    """OpenRouter provider for accessing multiple models via OpenRouter API."""
+    
+    def __init__(self, api_key: Optional[str] = None, model: str = "deepseek/deepseek-chat-v3-0324:free"):
+        if not OPENAI_AVAILABLE:
+            raise ImportError("openai package not installed (required for OpenRouter). Run: pip install openai")
+        
+        self.model = model
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        
+        if not self.api_key:
+            raise ValueError("OpenRouter API key required. Set OPENROUTER_API_KEY environment variable or pass api_key parameter")
+        
+        # Initialize OpenAI client with OpenRouter base URL
+        self.client = openai.OpenAI(
+            api_key=self.api_key,
+            base_url="https://openrouter.ai/api/v1"
+        )
+    
+    def _convert_tools_to_openai_format(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert Songbird tool schemas to OpenAI function format."""
+        openai_tools = []
+        
+        for tool in tools:
+            if tool["type"] == "function":
+                # OpenAI format is already compatible with our tool schema
+                openai_tools.append(tool)
+        
+        return openai_tools
+    
+    def _convert_openrouter_response_to_songbird(self, response) -> ChatResponse:
+        """Convert OpenRouter response to Songbird ChatResponse format."""
+        choice = response.choices[0]
+        message = choice.message
+        
+        content = message.content or ""
+        
+        # Convert tool calls if present
+        tool_calls = None
+        if message.tool_calls:
+            tool_calls = []
+            for tool_call in message.tool_calls:
+                tool_calls.append({
+                    "id": tool_call.id,
+                    "function": {
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments
+                    }
+                })
+        
+        # Convert usage information
+        usage_dict = None
+        if response.usage:
+            usage_dict = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+        
+        return ChatResponse(
+            content=content,
+            model=response.model,
+            usage=usage_dict,
+            tool_calls=tool_calls
+        )
+    
+    def chat(self, message: str, tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+        """Send a chat message to OpenRouter."""
+        try:
+            chat_kwargs = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": message}]
+            }
+            
+            # Add tools if provided (note: not all OpenRouter models support function calling)
+            if tools:
+                openai_tools = self._convert_tools_to_openai_format(tools)
+                chat_kwargs["tools"] = openai_tools
+                chat_kwargs["tool_choice"] = "auto"
+            
+            response = self.client.chat.completions.create(**chat_kwargs)
+            
+            return self._convert_openrouter_response_to_songbird(response)
+            
+        except openai.AuthenticationError:
+            raise ValueError("Invalid OpenRouter API key")
+        except openai.RateLimitError:
+            raise ConnectionError("OpenRouter rate limit exceeded")
+        except openai.APIError as e:
+            raise ConnectionError(f"OpenRouter API error: {e}")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to OpenRouter: {e}")
+    
+    def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+        """Send a conversation with multiple messages to OpenRouter."""
+        try:
+            chat_kwargs = {
+                "model": self.model,
+                "messages": messages
+            }
+            
+            # Add tools if provided (note: not all OpenRouter models support function calling)
+            if tools:
+                openai_tools = self._convert_tools_to_openai_format(tools)
+                chat_kwargs["tools"] = openai_tools
+                chat_kwargs["tool_choice"] = "auto"
+            
+            response = self.client.chat.completions.create(**chat_kwargs)
+            
+            return self._convert_openrouter_response_to_songbird(response)
+            
+        except openai.AuthenticationError:
+            raise ValueError("Invalid OpenRouter API key")
+        except openai.RateLimitError:
+            raise ConnectionError("OpenRouter rate limit exceeded")
+        except openai.APIError as e:
+            raise ConnectionError(f"OpenRouter API error: {e}")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to OpenRouter: {e}")
 
 
 class GeminiProvider(BaseProvider):
@@ -302,6 +703,18 @@ _providers: Dict[str, Type[BaseProvider]] = {
     "ollama": OllamaProvider,
 }
 
+# Add OpenAI provider if available
+if OPENAI_AVAILABLE:
+    _providers["openai"] = OpenAIProvider
+
+# Add Anthropic provider if available
+if ANTHROPIC_AVAILABLE:
+    _providers["claude"] = ClaudeProvider
+
+# Add OpenRouter provider if available (uses OpenAI library)
+if OPENAI_AVAILABLE:
+    _providers["openrouter"] = OpenRouterProvider
+
 # Add Gemini provider if available
 if GEMINI_AVAILABLE:
     _providers["gemini"] = GeminiProvider
@@ -321,7 +734,119 @@ def list_available_providers() -> List[str]:
 
 def get_default_provider() -> str:
     """Get the default provider name."""
-    # Prefer Gemini if available and API key is set, otherwise Ollama
+    # Provider priority: Gemini > Claude > OpenAI > OpenRouter > Ollama
+    # Check for API keys to determine availability
     if GEMINI_AVAILABLE and os.getenv("GOOGLE_API_KEY"):
         return "gemini"
-    return "ollama"
+    elif ANTHROPIC_AVAILABLE and os.getenv("ANTHROPIC_API_KEY"):
+        return "claude"
+    elif OPENAI_AVAILABLE and os.getenv("OPENAI_API_KEY"):
+        return "openai"
+    elif OPENAI_AVAILABLE and os.getenv("OPENROUTER_API_KEY"):
+        return "openrouter"
+    else:
+        return "ollama"
+
+
+def get_provider_info() -> Dict[str, Dict[str, Any]]:
+    """Get information about all available providers."""
+    provider_info = {}
+    
+    for name in _providers.keys():
+        info = {"available": True, "models": [], "api_key_env": None}
+        
+        if name == "ollama":
+            # Dynamic for Ollama - try to get actual models
+            try:
+                import requests
+                response = requests.get("http://localhost:11434/api/tags", timeout=2)
+                if response.status_code == 200:
+                    models = response.json().get('models', [])
+                    info["models"] = [model['name'] for model in models[:5]]  # Limit to first 5
+                else:
+                    info["models"] = ["qwen2.5-coder:7b", "devstral:latest", "llama3.2:latest"]
+            except:
+                info["models"] = ["qwen2.5-coder:7b", "devstral:latest", "llama3.2:latest"]
+            
+            info["api_key_env"] = None
+            info["description"] = "Local Ollama models"
+            
+        elif name == "gemini":
+            info["models"] = ["gemini-2.0-flash-001", "gemini-1.5-pro", "gemini-1.5-flash"]
+            info["api_key_env"] = "GOOGLE_API_KEY"
+            info["description"] = "Google Gemini AI models"
+            info["available"] = GEMINI_AVAILABLE and bool(os.getenv("GOOGLE_API_KEY"))
+            
+        elif name == "openai":
+            # Dynamic for OpenAI - try to get actual models
+            if OPENAI_AVAILABLE and os.getenv("OPENAI_API_KEY"):
+                try:
+                    import openai
+                    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                    models_response = client.models.list()
+                    
+                    chat_models = []
+                    for model in models_response.data:
+                        if any(prefix in model.id for prefix in ["gpt-4", "gpt-3.5"]):
+                            chat_models.append(model.id)
+                    
+                    info["models"] = sorted(chat_models)[:5] if chat_models else ["gpt-4o", "gpt-4o-mini"]
+                except:
+                    info["models"] = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]
+            else:
+                info["models"] = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]
+                
+            info["api_key_env"] = "OPENAI_API_KEY"
+            info["description"] = "OpenAI GPT models"
+            info["available"] = OPENAI_AVAILABLE and bool(os.getenv("OPENAI_API_KEY"))
+            
+        elif name == "claude":
+            # Claude doesn't have a models API, so keep hardcoded
+            info["models"] = ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"]
+            info["api_key_env"] = "ANTHROPIC_API_KEY"
+            info["description"] = "Anthropic Claude models"
+            info["available"] = ANTHROPIC_AVAILABLE and bool(os.getenv("ANTHROPIC_API_KEY"))
+            
+        elif name == "openrouter":
+            # Dynamic for OpenRouter - fetch tool-capable models from API
+            if OPENAI_AVAILABLE and os.getenv("OPENROUTER_API_KEY"):
+                try:
+                    import httpx
+                    headers = {
+                        "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+                        "Content-Type": "application/json"
+                    }
+                    response = httpx.get("https://openrouter.ai/api/v1/models", headers=headers, timeout=5.0)
+                    
+                    if response.status_code == 200:
+                        models_data = response.json()
+                        
+                        # Filter for models that support tools
+                        tool_capable_models = []
+                        for model in models_data.get("data", []):
+                            model_id = model.get("id", "")
+                            supported_parameters = model.get("supported_parameters", [])
+                            
+                            # Only include models that have "tools" in their supported_parameters
+                            if model_id and supported_parameters and "tools" in supported_parameters:
+                                tool_capable_models.append(model_id)
+                        
+                        # For provider info, show first few tool-capable models as examples
+                        if tool_capable_models:
+                            info["models"] = tool_capable_models[:5] 
+                        else:
+                            info["models"] = ["No tool-capable models found"]
+                    else:
+                        info["models"] = [f"API error: {response.status_code}"]
+                except Exception as e:
+                    info["models"] = [f"Error: {str(e)[:30]}..."]
+            else:
+                info["models"] = ["deepseek/deepseek-chat-v3-0324:free", "anthropic/claude-3.5-sonnet", "openai/gpt-4o"]
+                
+            info["api_key_env"] = "OPENROUTER_API_KEY"
+            info["description"] = "OpenRouter (access to multiple providers)"
+            info["available"] = OPENAI_AVAILABLE and bool(os.getenv("OPENROUTER_API_KEY"))
+        
+        provider_info[name] = info
+    
+    return provider_info

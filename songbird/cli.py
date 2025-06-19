@@ -365,7 +365,7 @@ def replay_conversation(session: Session):
 def main(
     ctx: typer.Context,
     provider: Optional[str] = typer.Option(
-        None, "--provider", "-p", help="LLM provider to use (gemini, ollama)"),
+        None, "--provider", "-p", help="LLM provider to use (openai, claude, gemini, ollama, openrouter)"),
     list_providers: bool = typer.Option(
         False, "--list-providers", help="List available providers and exit"),
     continue_session: bool = typer.Option(
@@ -382,12 +382,36 @@ def main(
     Run 'songbird version' to show version information.
     """
     if list_providers:
-        available = list_available_providers()
+        from .llm.providers import get_provider_info
+        
+        provider_info = get_provider_info()
         default = get_default_provider()
-        console.print("Available providers:", style="bold")
-        for p in available:
-            status = " (default)" if p == default else ""
-            console.print(f"  {p}{status}")
+        
+        console.print("Available LLM Providers:", style="bold cornflower_blue")
+        console.print()
+        
+        for provider_name, info in provider_info.items():
+            status_text = ""
+            if provider_name == default:
+                status_text = " [bright_green](default)[/bright_green]"
+            elif not info["available"]:
+                status_text = " [red](unavailable)[/red]"
+            
+            console.print(f"[bold]{provider_name}[/bold]{status_text}")
+            console.print(f"  Description: {info['description']}")
+            
+            if info["api_key_env"]:
+                key_status = "✓" if info["available"] else "✗"
+                console.print(f"  API Key: {info['api_key_env']} [{key_status}]")
+            
+            if info["models"]:
+                model_list = ", ".join(info["models"][:3])
+                if len(info["models"]) > 3:
+                    model_list += f" (+{len(info['models']) - 3} more)"
+                console.print(f"  Models: {model_list}")
+            
+            console.print()
+        
         return
 
     if ctx.invoked_subcommand is None:
@@ -503,11 +527,14 @@ def chat(
 
     # Set default models based on provider
     default_models = {
-        "gemini": "gemini-2.0-flash-exp",
-        "ollama": "qwen2.5-coder:7b"
+        "openai": "gpt-4o",
+        "claude": "claude-3-5-sonnet-20241022",
+        "gemini": "gemini-2.0-flash-001",
+        "ollama": "qwen2.5-coder:7b",
+        "openrouter": "deepseek/deepseek-chat-v3-0324:free"
     }
     model_name = restored_model or default_models.get(
-        provider_name, "qwen2.5-coder:7b")
+        provider_name, default_models.get("ollama"))
 
     # Save initial provider config to session (if we have a session)
     if session:
@@ -521,14 +548,14 @@ def chat(
     try:
         provider_class = get_provider(provider_name)
 
-        if provider_name == "gemini":
-            provider_instance = provider_class(model=model_name)
-        elif provider_name == "ollama":
+        # Initialize provider based on type
+        if provider_name == "ollama":
             provider_instance = provider_class(
                 base_url="http://127.0.0.1:11434",
                 model=model_name
             )
         else:
+            # For all other providers (openai, claude, gemini, openrouter), just pass the model
             provider_instance = provider_class(model=model_name)
 
         # Create orchestrator with session
@@ -541,11 +568,28 @@ def chat(
 
     except Exception as e:
         console.print(f"Error starting Songbird: {e}", style="red")
-        if provider_name == "gemini":
+        
+        # Provide helpful troubleshooting information based on provider
+        if provider_name == "openai":
+            console.print(
+                "Make sure you have set OPENAI_API_KEY environment variable", style="dim")
+            console.print(
+                "Get your API key from: https://platform.openai.com/api-keys", style="dim")
+        elif provider_name == "claude":
+            console.print(
+                "Make sure you have set ANTHROPIC_API_KEY environment variable", style="dim")
+            console.print(
+                "Get your API key from: https://console.anthropic.com/account/keys", style="dim")
+        elif provider_name == "gemini":
             console.print(
                 "Make sure you have set GOOGLE_API_KEY environment variable", style="dim")
             console.print(
                 "Get your API key from: https://aistudio.google.com/app/apikey", style="dim")
+        elif provider_name == "openrouter":
+            console.print(
+                "Make sure you have set OPENROUTER_API_KEY environment variable", style="dim")
+            console.print(
+                "Get your API key from: https://openrouter.ai/keys", style="dim")
         elif provider_name == "ollama":
             console.print(
                 "Make sure Ollama is running: ollama serve", style="dim")
