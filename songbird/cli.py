@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.status import Status
 from rich.panel import Panel
 from rich.syntax import Syntax
+from rich.markdown import Markdown
 from . import __version__
 from .llm.providers import get_provider, get_default_provider
 from .conversation import ConversationOrchestrator
@@ -26,6 +27,41 @@ from .commands.loader import is_command_input, parse_command_input, load_all_com
 app = typer.Typer(add_completion=False, rich_markup_mode="rich",
                   help="Songbird - Terminal-first AI coding companion", no_args_is_help=False)
 console = Console()
+
+
+def render_ai_response(content: str, speaker_name: str = "Songbird"):
+    """
+    Render AI response content as markdown with proper formatting.
+    Avoids using # headers to prevent box formation in terminal.
+    """
+    if not content or not content.strip():
+        return
+    
+    # Clean up the content - remove any # headers and replace with **bold**
+    lines = content.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        # Convert # headers to **bold** text to avoid boxes
+        if line.strip().startswith('#'):
+            # Remove # symbols and make bold
+            header_text = line.lstrip('#').strip()
+            if header_text:
+                cleaned_lines.append(f"**{header_text}**")
+            else:
+                cleaned_lines.append("")
+        else:
+            cleaned_lines.append(line)
+    
+    cleaned_content = '\n'.join(cleaned_lines)
+    
+    # Create markdown renderable
+    md_renderable = Markdown(cleaned_content, code_theme="github-dark")
+    
+    # Print speaker name with color, then markdown content
+    console.print(f"\n[medium_spring_green]{speaker_name}[/medium_spring_green]:")
+    console.print(md_renderable)
+
 
 # ------------------------------------------------------------------ #
 #  Ctrl-C double-tap guard (global)
@@ -338,14 +374,12 @@ def replay_conversation(session: Session):
 
                 # If there's content after tool calls, show it
                 if msg.content:
-                    console.print(
-                        f"\n[medium_spring_green]Songbird[/medium_spring_green]: {msg.content}")
+                    render_ai_response(msg.content)
 
             else:
                 # Regular assistant message
                 if msg.content:
-                    console.print(
-                        f"\n[medium_spring_green]Songbird[/medium_spring_green]: {msg.content}")
+                    render_ai_response(msg.content)
                 i += 1
 
         elif msg.role == "tool":
@@ -688,9 +722,9 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                 # Small delay for clean output
                 await asyncio.sleep(0.05)
             
-            # Display response with proper spacing
+            # Display response with markdown formatting
             if response:
-                console.print(f"[medium_spring_green]Songbird[/medium_spring_green]: {response}")
+                render_ai_response(response)
                 
             # Invalidate history cache
             command_input_handler.invalidate_history_cache()
