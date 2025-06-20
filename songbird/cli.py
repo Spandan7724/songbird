@@ -11,25 +11,57 @@ from datetime import datetime
 import json
 import typer
 from rich.console import Console
-from rich.prompt import Prompt
 from rich.status import Status
-from rich.live import Live
-from rich.table import Table
-from rich.table import Table
 from rich.panel import Panel
 from rich.syntax import Syntax
+from rich.markdown import Markdown
 from . import __version__
-from .llm.providers import get_provider, list_available_providers, get_default_provider
-from .conversation import ConversationOrchestrator, safe_interactive_menu
+from .llm.providers import get_provider, get_default_provider
+from .conversation import ConversationOrchestrator
 from .memory.manager import SessionManager
 from .memory.models import Session
-from .commands import CommandSelector, get_command_registry, CommandInputHandler
+from .commands import CommandInputHandler, get_command_registry
 from .memory.history_manager import MessageHistoryManager
-from .commands.loader import load_all_commands, is_command_input, parse_command_input
+from .commands.loader import is_command_input, parse_command_input, load_all_commands
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich",
                   help="Songbird - Terminal-first AI coding companion", no_args_is_help=False)
 console = Console()
+
+
+def render_ai_response(content: str, speaker_name: str = "Songbird"):
+    """
+    Render AI response content as markdown with proper formatting.
+    Avoids using # headers to prevent box formation in terminal.
+    """
+    if not content or not content.strip():
+        return
+    
+    # Clean up the content - remove any # headers and replace with **bold**
+    lines = content.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        # Convert # headers to **bold** text to avoid boxes
+        if line.strip().startswith('#'):
+            # Remove # symbols and make bold
+            header_text = line.lstrip('#').strip()
+            if header_text:
+                cleaned_lines.append(f"**{header_text}**")
+            else:
+                cleaned_lines.append("")
+        else:
+            cleaned_lines.append(line)
+    
+    cleaned_content = '\n'.join(cleaned_lines)
+    
+    # Create markdown renderable
+    md_renderable = Markdown(cleaned_content, code_theme="github-dark")
+    
+    # Print speaker name with color, then markdown content
+    console.print(f"\n[medium_spring_green]{speaker_name}[/medium_spring_green]:")
+    console.print(md_renderable)
+
 
 # ------------------------------------------------------------------ #
 #  Ctrl-C double-tap guard (global)
@@ -135,7 +167,7 @@ def format_time_ago(dt: datetime) -> str:
         return "just now"
 
 
-async def display_session_selector(sessions: list[Session]) -> Optional[Session]:
+def display_session_selector(sessions: list[Session]) -> Optional[Session]:
     """Display an interactive session selector with better terminal handling."""
     if not sessions:
         console.print("No previous sessions found.", style="yellow")
@@ -166,15 +198,16 @@ async def display_session_selector(sessions: list[Session]) -> Optional[Session]
     if len(sessions) > max_sessions:
         console.print(f"[yellow]Showing {max_sessions} most recent sessions out of {len(sessions)} total[/yellow]\n")
     
-    # Use interactive menu
-    selected_idx = await safe_interactive_menu(
-        "Select a session to resume:",
-        options,
-        default_index=0
-    )
-    
-    if selected_idx is None:
-        # User cancelled, return None to indicate cancellation
+    # Use interactive menu (synchronous)
+    from .conversation import interactive_menu
+    try:
+        selected_idx = interactive_menu(
+            "Select a session to resume:",
+            options,
+            default_index=0
+        )
+    except KeyboardInterrupt:
+        console.print("\nOperation cancelled by user.")
         return None
     
     if selected_idx == len(display_sessions):
@@ -187,8 +220,6 @@ def replay_conversation(session: Session):
     """Replay the conversation history to show it as the user saw it."""
     # Import here to avoid circular dependency
     from .tools.file_operations import display_diff_preview
-    from rich.panel import Panel
-    from rich.syntax import Syntax
 
     # Group messages with their tool calls and results
     i = 0
@@ -209,7 +240,7 @@ def replay_conversation(session: Session):
             if msg.tool_calls:
                 # Show thinking message
                 console.print(
-                    f"\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
+                    "\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
 
                 # Track tool index for matching with tool results
                 tool_result_idx = i + 1
@@ -343,14 +374,12 @@ def replay_conversation(session: Session):
 
                 # If there's content after tool calls, show it
                 if msg.content:
-                    console.print(
-                        f"\n[medium_spring_green]Songbird[/medium_spring_green]: {msg.content}")
+                    render_ai_response(msg.content)
 
             else:
                 # Regular assistant message
                 if msg.content:
-                    console.print(
-                        f"\n[medium_spring_green]Songbird[/medium_spring_green]: {msg.content}")
+                    render_ai_response(msg.content)
                 i += 1
 
         elif msg.role == "tool":
@@ -365,7 +394,7 @@ def replay_conversation(session: Session):
 def main(
     ctx: typer.Context,
     provider: Optional[str] = typer.Option(
-        None, "--provider", "-p", help="LLM provider to use (gemini, ollama)"),
+        None, "--provider", "-p", help="LLM provider to use (openai, claude, gemini, ollama, openrouter)"),
     list_providers: bool = typer.Option(
         False, "--list-providers", help="List available providers and exit"),
     continue_session: bool = typer.Option(
@@ -382,12 +411,36 @@ def main(
     Run 'songbird version' to show version information.
     """
     if list_providers:
-        available = list_available_providers()
+        from .llm.providers import get_provider_info
+        
+        provider_info = get_provider_info()
         default = get_default_provider()
-        console.print("Available providers:", style="bold")
-        for p in available:
-            status = " (default)" if p == default else ""
-            console.print(f"  {p}{status}")
+        
+        console.print("Available LLM Providers:", style="bold cornflower_blue")
+        console.print()
+        
+        for provider_name, info in provider_info.items():
+            status_text = ""
+            if provider_name == default:
+                status_text = " [bright_green](default)[/bright_green]"
+            elif not info["available"]:
+                status_text = " [red](unavailable)[/red]"
+            
+            console.print(f"[bold]{provider_name}[/bold]{status_text}")
+            console.print(f"  Description: {info['description']}")
+            
+            if info["api_key_env"]:
+                key_status = "✓" if info["available"] else "✗"
+                console.print(f"  API Key: {info['api_key_env']} [{key_status}]")
+            
+            if info["models"]:
+                model_list = ", ".join(info["models"][:3])
+                if len(info["models"]) > 3:
+                    model_list += f" (+{len(info['models']) - 3} more)"
+                console.print(f"  Models: {model_list}")
+            
+            console.print()
+        
         return
 
     if ctx.invoked_subcommand is None:
@@ -443,7 +496,7 @@ def chat(
     elif resume_session:
         sessions = session_manager.list_sessions()
         if sessions:
-            selected_session = asyncio.run(display_session_selector(sessions))
+            selected_session = display_session_selector(sessions)
             if selected_session:
                 session = session_manager.load_session(selected_session.id)
                 if session:
@@ -484,17 +537,13 @@ def chat(
     console.print(
         "Type [spring_green1]'/'[/spring_green1] for commands, or [spring_green1]'exit'[/spring_green1] to quit.\n", style="dim")
 
-    # Load command system
-    command_registry = load_all_commands()
-    command_selector = CommandSelector(command_registry, console)
-    
-    # Create session manager for history
-    session_manager = SessionManager(os.getcwd())
+
     
     # Create history manager (will be passed to input handler after orchestrator is created)
     history_manager = MessageHistoryManager(session_manager)
     
-    # Create input handler with history support
+    # Create command registry and load all commands
+    command_registry = load_all_commands()
     command_input_handler = CommandInputHandler(command_registry, console, history_manager)
 
     # Determine provider and model
@@ -503,11 +552,14 @@ def chat(
 
     # Set default models based on provider
     default_models = {
-        "gemini": "gemini-2.0-flash-exp",
-        "ollama": "qwen2.5-coder:7b"
+        "openai": "gpt-4o",
+        "claude": "claude-3-5-sonnet-20241022",
+        "gemini": "gemini-2.0-flash-001",
+        "ollama": "qwen2.5-coder:7b",
+        "openrouter": "deepseek/deepseek-chat-v3-0324:free"
     }
     model_name = restored_model or default_models.get(
-        provider_name, "qwen2.5-coder:7b")
+        provider_name, default_models.get("ollama"))
 
     # Save initial provider config to session (if we have a session)
     if session:
@@ -521,14 +573,14 @@ def chat(
     try:
         provider_class = get_provider(provider_name)
 
-        if provider_name == "gemini":
-            provider_instance = provider_class(model=model_name)
-        elif provider_name == "ollama":
+        # Initialize provider based on type
+        if provider_name == "ollama":
             provider_instance = provider_class(
                 base_url="http://127.0.0.1:11434",
                 model=model_name
             )
         else:
+            # For all other providers (openai, claude, gemini, openrouter), just pass the model
             provider_instance = provider_class(model=model_name)
 
         # Create orchestrator with session
@@ -541,11 +593,28 @@ def chat(
 
     except Exception as e:
         console.print(f"Error starting Songbird: {e}", style="red")
-        if provider_name == "gemini":
+        
+        # Provide helpful troubleshooting information based on provider
+        if provider_name == "openai":
+            console.print(
+                "Make sure you have set OPENAI_API_KEY environment variable", style="dim")
+            console.print(
+                "Get your API key from: https://platform.openai.com/api-keys", style="dim")
+        elif provider_name == "claude":
+            console.print(
+                "Make sure you have set ANTHROPIC_API_KEY environment variable", style="dim")
+            console.print(
+                "Get your API key from: https://console.anthropic.com/account/keys", style="dim")
+        elif provider_name == "gemini":
             console.print(
                 "Make sure you have set GOOGLE_API_KEY environment variable", style="dim")
             console.print(
                 "Get your API key from: https://aistudio.google.com/app/apikey", style="dim")
+        elif provider_name == "openrouter":
+            console.print(
+                "Make sure you have set OPENROUTER_API_KEY environment variable", style="dim")
+            console.print(
+                "Get your API key from: https://openrouter.ai/keys", style="dim")
         elif provider_name == "ollama":
             console.print(
                 "Make sure Ollama is running: ollama serve", style="dim")
@@ -562,7 +631,7 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
     while True:
         try:
             # Get user input
-            user_input = command_input_handler.get_input_with_commands("You")
+            user_input = await command_input_handler.get_input_with_commands("You")
             
             if user_input.lower() in ["exit", "quit", "bye"]:
                 console.print("\nGoodbye!", style="bold blue")
@@ -604,8 +673,7 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                                 orchestrator.session_manager.save_session(
                                     orchestrator.session)
                             # Invalidate history cache since we cleared messages
-                            if command_input_handler.history_manager:
-                                command_input_handler.history_manager.invalidate_cache()
+                            command_input_handler.invalidate_history_cache()
                         
                         if result.data.get("new_model"):
                             # Model was changed, update display and save to session
@@ -654,13 +722,12 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                 # Small delay for clean output
                 await asyncio.sleep(0.05)
             
-            # Display response with proper spacing
+            # Display response with markdown formatting
             if response:
-                console.print(f"[medium_spring_green]Songbird[/medium_spring_green]: {response}")
+                render_ai_response(response)
                 
             # Invalidate history cache
-            if command_input_handler.history_manager:
-                command_input_handler.history_manager.invalidate_cache()
+            command_input_handler.invalidate_history_cache()
                 
         except KeyboardInterrupt:
             console.print("\nGoodbye!", style="bold blue")

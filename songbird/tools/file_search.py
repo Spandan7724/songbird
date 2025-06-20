@@ -6,9 +6,8 @@ import asyncio
 import json
 import shutil
 import os
-import subprocess
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from rich.console import Console
 from rich.table import Table
 import glob
@@ -105,7 +104,6 @@ async def _search_with_ripgrep(
             elif is_glob_pattern:
                 # If it's a glob pattern like *.py, extract the extension
                 if pattern.startswith("*."):
-                    ext = pattern[2:]  # Remove *.
                     # Use glob filter instead of type for custom extensions
                     cmd.extend(["--glob", pattern])
                 else:
@@ -282,7 +280,7 @@ async def _search_with_python(
                                             "line_number": line_num,
                                             "match_text": line.strip()
                                         })
-                        except:
+                        except Exception:
                             # Skip files that can't be read
                             continue
 

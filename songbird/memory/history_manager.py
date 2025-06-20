@@ -15,32 +15,51 @@ class MessageHistoryManager:
         self._original_input = ""
     
     def _load_project_user_messages(self) -> List[str]:
-        """Load all user messages from current project sessions."""
+        """Load all user messages from current project sessions, sorted chronologically."""
         if self._history_cache is not None:
             return self._history_cache
         
-        user_messages = []
+        # Collect all user messages with their timestamps
+        messages_with_time = []
         
         # Get all sessions for current project
         sessions_info = self.session_manager.list_sessions()
-        
-        # Load full sessions to get messages, sorted by creation time
-        sessions_info.sort(key=lambda s: s.created_at)
         
         for session_info in sessions_info:
             # Load full session with messages
             session = self.session_manager.load_session(session_info.id)
             if session and session.messages:
-                # Extract user messages from this session
-                for message in session.messages:
+                # Extract user messages from this session with timestamps
+                for i, message in enumerate(session.messages):
                     if isinstance(message, Message) and message.role == "user":
                         content = message.content.strip()
                         # Skip empty messages, command-only inputs, and very short messages
                         if (content and 
                             not content.startswith('/') and 
-                            len(content) > 2 and
-                            content not in user_messages[-10:]):  # Basic deduplication
-                            user_messages.append(content)
+                            len(content) > 2):
+                            # Use session creation time + message index for approximate timestamp
+                            # This ensures messages are ordered correctly within and across sessions
+                            timestamp = session.created_at.timestamp() + (i * 0.001)  # Add milliseconds for ordering
+                            messages_with_time.append((timestamp, content))
+        
+        # Sort by timestamp (oldest first) and deduplicate
+        messages_with_time.sort(key=lambda x: x[0])
+        
+        # Extract just the content, with basic deduplication
+        user_messages = []
+        seen_messages = set()
+        for _, content in messages_with_time:
+            # Simple deduplication - skip if we've seen this exact message recently
+            if content not in seen_messages:
+                user_messages.append(content)
+                seen_messages.add(content)
+                # Keep only recent messages in the seen set for rolling deduplication
+                if len(seen_messages) > 50:
+                    seen_messages.clear()
+        
+        # Reverse the list so that newest messages come first
+        # This is what prompt-toolkit expects for proper up-arrow navigation
+        user_messages.reverse()
         
         # Cache the results
         self._history_cache = user_messages
@@ -55,8 +74,8 @@ class MessageHistoryManager:
             self._current_index = -1
             return current_input
         
-        # Start from the most recent message
-        self._current_index = len(history) - 1
+        # Start from the most recent message (now at index 0 since we reversed the list)
+        self._current_index = 0
         return history[self._current_index]
     
     def navigate_up(self) -> Optional[str]:
@@ -68,12 +87,12 @@ class MessageHistoryManager:
         
         # If we're not in navigation mode, start it
         if self._current_index == -1:
-            self._current_index = len(history) - 1
+            self._current_index = 0  # Start from most recent (index 0)
             return history[self._current_index]
         
-        # Move to older message
-        if self._current_index > 0:
-            self._current_index -= 1
+        # Move to older message (higher index since newest is at 0)
+        if self._current_index < len(history) - 1:
+            self._current_index += 1
             return history[self._current_index]
         
         # Already at oldest message
@@ -86,12 +105,12 @@ class MessageHistoryManager:
         if not history or self._current_index == -1:
             return None
         
-        # Move to newer message
-        if self._current_index < len(history) - 1:
-            self._current_index += 1
+        # Move to newer message (lower index since newest is at 0)
+        if self._current_index > 0:
+            self._current_index -= 1
             return history[self._current_index]
         else:
-            # Reached the end, go back to original input
+            # Reached the newest message, go back to original input
             self._current_index = -1
             return self._original_input
     

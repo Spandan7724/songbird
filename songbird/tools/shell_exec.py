@@ -5,16 +5,11 @@ Shell command execution tool for running terminal commands safely.
 import asyncio
 import os
 import platform
-import shlex
 from pathlib import Path
 from typing import Dict, Any, Optional
 from rich.console import Console
 from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.text import Text
-from rich.live import Live
-from rich.spinner import Spinner
-from rich.columns import Columns
 
 console = Console()
 
@@ -263,7 +258,7 @@ async def shell_exec_safe(
     """
     # Check if command is safe
     if not is_command_safe(command):
-        console.print(f"\n[bold red]Safety check failed![/bold red] This command appears potentially dangerous.")
+        console.print("\n[bold red]Safety check failed![/bold red] This command appears potentially dangerous.")
         console.print(f"Command: {command}")
         
         return {

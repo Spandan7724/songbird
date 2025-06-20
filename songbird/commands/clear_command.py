@@ -4,7 +4,6 @@ Clear command for clearing the current conversation history.
 """
 
 from typing import Dict, Any
-from rich.console import Console
 from rich.prompt import Confirm
 from .base import BaseCommand, CommandResult
 

@@ -4,7 +4,7 @@ Command registry for managing available commands.
 """
 
 from typing import Dict, List, Optional
-from .base import BaseCommand, CommandResult
+from .base import BaseCommand
 
 
 class CommandRegistry:
