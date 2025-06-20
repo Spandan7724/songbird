@@ -531,9 +531,9 @@ def chat(
             "\nWelcome to Songbird - Your AI coding companion!", style="cornflower_blue")
 
     console.print(
-        "Available tools: file_search, file_read, file_create, file_edit, shell_exec", style="dim")
+        "Available tools: file_search, file_read, file_create, file_edit, shell_exec, todo_read, todo_write, glob, grep, ls, multi_edit", style="dim")
     console.print(
-        "I can search, read, edit files with diffs, and run shell commands.", style="dim")
+        "I can search files, manage todos, run shell commands, and perform multi-file operations with full task management.", style="dim")
     console.print(
         "Type [spring_green1]'/'[/spring_green1] for commands, or [spring_green1]'exit'[/spring_green1] to quit.\n", style="dim")
 

@@ -551,10 +551,7 @@ class GeminiProvider(BaseProvider):
                 # Convert properties to Gemini schema format
                 gemini_properties = {}
                 for prop_name, prop_info in properties.items():
-                    gemini_properties[prop_name] = genai_types.Schema(
-                        type=prop_info["type"].upper(),
-                        description=prop_info.get("description", "")
-                    )
+                    gemini_properties[prop_name] = self._convert_property_to_gemini_schema(prop_info)
                 
                 # Create function declaration
                 function_decl = genai_types.FunctionDeclaration(
@@ -570,6 +567,38 @@ class GeminiProvider(BaseProvider):
                 gemini_tools.append(genai_types.Tool(function_declarations=[function_decl]))
         
         return gemini_tools
+
+    def _convert_property_to_gemini_schema(self, prop_info: Dict[str, Any]) -> genai_types.Schema:
+        """Convert a single property schema to Gemini format, handling nested objects and arrays."""
+        prop_type = prop_info["type"].upper()
+        description = prop_info.get("description", "")
+        
+        schema_kwargs = {
+            "type": prop_type,
+            "description": description
+        }
+        
+        # Handle array items
+        if prop_type == "ARRAY" and "items" in prop_info:
+            items_schema = prop_info["items"]
+            schema_kwargs["items"] = self._convert_property_to_gemini_schema(items_schema)
+        
+        # Handle object properties (nested objects)
+        elif prop_type == "OBJECT" and "properties" in prop_info:
+            nested_properties = {}
+            for nested_prop_name, nested_prop_info in prop_info["properties"].items():
+                nested_properties[nested_prop_name] = self._convert_property_to_gemini_schema(nested_prop_info)
+            schema_kwargs["properties"] = nested_properties
+            
+            # Handle required fields for nested objects
+            if "required" in prop_info:
+                schema_kwargs["required"] = prop_info["required"]
+        
+        # Handle enum values
+        if "enum" in prop_info:
+            schema_kwargs["enum"] = prop_info["enum"]
+        
+        return genai_types.Schema(**schema_kwargs)
     
     def _convert_gemini_response_to_songbird(self, response) -> ChatResponse:
         """Convert Gemini response to Songbird ChatResponse format."""
@@ -593,7 +622,7 @@ class GeminiProvider(BaseProvider):
             # Check if function calls are in candidates content parts (alternative location)
             if hasattr(response, 'candidates') and response.candidates:
                 candidate = response.candidates[0]
-                if hasattr(candidate.content, 'parts'):
+                if hasattr(candidate, 'content') and candidate.content and hasattr(candidate.content, 'parts') and candidate.content.parts:
                     tool_calls = []
                     for part in candidate.content.parts:
                         if hasattr(part, 'function_call') and part.function_call:
