@@ -13,9 +13,11 @@
 
 **A terminal-first AI coding companion with 11 professional tools, smart task management, and persistent memory**
 
+[![CI](https://github.com/Spandan7724/songbird/workflows/CI/badge.svg)](https://github.com/Spandan7724/songbird/actions/workflows/ci.yml)
+[![PyPI version](https://badge.fury.io/py/songbird-ai.svg)](https://badge.fury.io/py/songbird-ai)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Powered by Ollama](https://img.shields.io/badge/Powered%20by-Ollama-ff6b6b.svg)](https://ollama.ai)
+[![Downloads](https://img.shields.io/pypi/dm/songbird-ai)](https://pypi.org/project/songbird-ai/)
 
 </div>
 

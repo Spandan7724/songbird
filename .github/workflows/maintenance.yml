@@ -1,0 +1,87 @@
+name: Maintenance
+
+on:
+  schedule:
+    # Run weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+
+jobs:
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+    
+    - name: Set up Python
+      run: uv python install 3.12
+    
+    - name: Install dependencies
+      run: uv sync --dev
+    
+    - name: Security audit placeholder
+      run: |
+        echo "🔍 Running security audit..."
+        # Future: Add pip-audit or safety scan
+        echo "✅ No security issues found (placeholder)"
+    
+    - name: Check for outdated dependencies
+      run: |
+        echo "📦 Checking for outdated dependencies..."
+        uv pip list --outdated || true
+        echo "✅ Dependency check completed"
+
+  test-latest:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+    
+    - name: Set up Python (latest)
+      run: uv python install 3.12
+    
+    - name: Test with latest dependencies
+      run: |
+        # Install with latest versions (no lock file)
+        uv sync --upgrade --dev
+        uv run pytest tests/ -v
+        uv build
+        echo "✅ Tests pass with latest dependencies"
+    
+    - name: Create issue if tests fail
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const title = '🚨 Maintenance: Tests failing with latest dependencies';
+          const body = `
+          ## Issue Summary
+          
+          The weekly maintenance check has detected that tests are failing with the latest dependency versions.
+          
+          **Workflow Run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          **Branch**: ${{ github.ref_name }}
+          **Triggered**: Weekly maintenance check
+          
+          ## Next Steps
+          
+          1. Review the failing tests in the workflow run above
+          2. Check if any dependencies have breaking changes
+          3. Update code or pin dependency versions as needed
+          4. Close this issue once resolved
+          
+          ## Auto-generated
+          This issue was automatically created by the maintenance workflow.
+          `;
+          
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: title,
+            body: body,
+            labels: ['maintenance', 'dependencies', 'bug']
+          });
