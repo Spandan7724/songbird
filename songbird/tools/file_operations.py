@@ -159,7 +159,7 @@ async def file_read(file_path: str, lines: Optional[int] = None, start_line: Opt
         }
 
 
-async def file_edit(file_path: str, new_content: str, create_backup: bool = True) -> Dict[str, Any]:
+async def file_edit(file_path: str, new_content: str, create_backup: bool = False) -> Dict[str, Any]:
     """
     Edit file with diff preview and confirmation.
     

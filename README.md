@@ -11,11 +11,10 @@
 ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═╝╚═════╝
 </pre>
 
-**A terminal-first AI coding companion with persistent memory and enhanced search capabilities**
+**A terminal-first AI coding companion with Claude Code feature parity - 11 professional tools, smart task management, and persistent memory**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Powered by Ollama](https://img.shields.io/badge/Powered%20by-Ollama-ff6b6b.svg)](https://ollama.ai)
 
 </div>
@@ -66,49 +65,59 @@ songbird --provider ollama --continue
 
 ## Features
 
-### **Persistent Memory System** 🧠
+
+**11 Professional Tools** for complete development workflows:
+- **Enhanced File Operations**: `file_search`, `file_read`, `file_create`, `file_edit` with syntax highlighting and diff previews
+- **Smart Task Management**: `todo_read`, `todo_write` with automatic prioritization and session persistence
+- **Advanced File Discovery**: `glob` pattern matching, `grep` regex search, enhanced `ls` directory listing
+- **Atomic Operations**: `multi_edit` for safe bulk file changes with rollback capabilities
+- **Shell Integration**: `shell_exec` with live output streaming and cross-platform support
+
+### **Intelligent Task Management**
+- **Session-Aware Todos**: Create, track, and complete development tasks with automatic priority assignment
+- **Smart Prioritization**: AI analyzes task content to assign appropriate priority levels
+- **Project Isolation**: Each git repository gets separate task storage
+- **Rich Visual Display**: Beautiful tables with status indicators, priorities, and creation dates
+
+### **Advanced File Discovery & Search**
+- **Glob Patterns**: Find files with patterns like `**/*.py`, `src/**/*.js`, `*test*.{py,js}`
+- **Regex Content Search**: Powerful regex search with context lines and highlighting
+- **Enhanced Directory Listing**: Rich formatted output with sorting and metadata
+- **Smart File Detection**: Automatically detects filename vs content searches
+- **Type-Specific Search**: Filter by file extensions (py, js, md, txt, json, yaml, etc.)
+
+### **Atomic Multi-File Operations**
+- **Bulk Editing**: Edit multiple files simultaneously with safety guarantees
+- **Beautiful Previews**: Unified diff display for all changes before applying
+- **Rollback Protection**: Automatic rollback if any operation fails
+- **Atomic Transactions**: All-or-nothing approach ensures consistency
+
+### **Persistent Memory System**
 - **Session Persistence**: Automatic conversation saving with project-aware storage
 - **Seamless Continuation**: Resume exactly where you left off with `--continue`
 - **Session Browser**: Interactive menu to select from previous sessions with `--resume`
 - **Project Isolation**: Each git repository gets separate session storage
 - **Visual Replay**: Perfect restoration of conversation history with tool outputs
 
-### **Enhanced Search & Navigation** 🔍
-- **Smart File Search**: Type-specific search with `file_type` parameters (py, js, md, etc.)
-- **Glob Patterns**: Find files with patterns like `*.py`, `*test*.py`, `config.*`
-- **Rich Display**: Beautiful table output with file statistics and match counts
-- **Filename Detection**: Automatically detects filename vs content searches
-- **Cross-Platform**: Ripgrep integration with Python fallback
-
-### **Dynamic Command System** ⚡
+### **Dynamic Command System**
 - **In-Chat Commands**: Type `/` for instant command access without leaving conversation
 - **Real-Time Model Switching**: Change models with `/model` command - no session restart needed
 - **Model Persistence**: Model changes automatically save and restore across sessions
 - **Help System**: Comprehensive `/help` command with examples and documentation
 - **Session Management**: `/clear` command for conversation management
 
-### **Flexible AI Options**
-- **Cloud AI**: Use Google's powerful Gemini models for best performance and latest features
-- **Local AI**: Run models locally with Ollama for privacy and offline use
-- **Multiple Models**: Support for Gemini 2.0 Flash, Qwen2.5-Coder, CodeLlama, and more
-- **Dynamic Switching**: Switch models instantly with in-chat `/model` commands
-
-### **Developer Tools Integration**
-- **File Search**: Lightning-fast code search with ripgrep integration
-- **Smart Diffs**: Generate and preview code changes with colored diffs
-- **Shell Integration**: Execute commands safely with built-in sandboxing
-- **Git Workflow**: Seamless integration with version control
+### **Multi-Provider AI Support**
+- **5 AI Providers**: OpenAI, Anthropic Claude, Google Gemini, Ollama, and OpenRouter
+- **Automatic Provider Selection**: Intelligent fallback based on available API keys
+- **Cloud & Local**: Use powerful cloud models or private local models
+- **Dynamic Switching**: Switch models and providers instantly during conversations
 
 ### **Safety & Security**
 - **Repository Sandboxing**: Cannot access files outside your project
-- **Diff Previews**: Review all changes before applying
-- **Secret Filtering**: Automatically redact API keys and sensitive data
-- **Command Allowlists**: Safe execution of shell commands
+- **Diff Previews**: Review all changes before applying with beautiful unified diffs
+- **Atomic Operations**: Safe multi-file editing with automatic rollback
+- **Input Validation**: Comprehensive validation for all tool operations
 
-###  **Built for Quality**
-- **Test-Driven Development**: Comprehensive test suite with >90% coverage
-- **Type Safety**: Full type hints and static analysis
-- **Modern Python**: Built with Python 3.10+ and modern packaging
 
 ## Installation
 
@@ -196,9 +205,9 @@ songbird
 songbird --provider gemini
 songbird --provider ollama
 
-# Use specific model
-songbird --provider gemini --model gemini-2.0-flash-001
-songbird --provider ollama --model qwen2.5-coder:7b
+# Use specific model (or change models during conversation with /model)
+/model gemini-2.0-flash-001    # Switch models in conversation
+/model qwen2.5-coder:7b        # No restart needed
 
 # Check available providers
 songbird --list-providers
@@ -252,27 +261,6 @@ Once in a conversation, use these powerful commands:
 # Session management
 /clear                    # Clear conversation history
 /clear --force            # Clear without confirmation
-```
-
-### Example Conversation
-
-```
-You: Create a Python script that calculates fibonacci numbers
-
-Songbird: I'll create a Python script for calculating Fibonacci numbers...
-[Creates fibonacci.py with optimized implementation]
-
-You: /model devstral:latest
-Switched to model: devstral:latest
-
-You: Now optimize it for very large numbers
-
-Songbird: I'll optimize the Fibonacci script for large numbers using memoization...
-[Shows optimized version with performance improvements]
-
-You: /clear
-Clear current conversation history? [y/n]: y
-Conversation cleared!
 ```
 
 
@@ -331,39 +319,21 @@ uv tool install ./dist/songbird_ai-*.whl
 
 Songbird follows a **test-driven, phase-based development** approach:
 
-- [x] **Phase 1**: LLM Provider Layer 
+- [x] **Phase 1**: LLM Provider Layer (OpenAI, Claude, Gemini, Ollama, OpenRouter)
 - [x] **Phase 2**: File Search (enhanced with type filtering and smart detection)
-- [x] **Phase 3**: Patch Generation & Apply
+- [x] **Phase 3**: Patch Generation & Apply (with beautiful diff previews)
 - [x] **Phase 4**: Shell Execution (live streaming and cross-platform)
-- [x] **Phase 5**: Conversation Orchestrator
+- [x] **Phase 5**: Conversation Orchestrator (multi-turn with tool calling)
 - [x] **Phase 6**: Advanced UI/UX (interactive menus and rich displays)
 - [x] **Phase 7**: Session Memory (complete with project-aware storage)
-- [ ] **Phase 8**: MCP Server Protocol
-- [ ] **Phase 9**: Model & Provider Management
-- [ ] **Phase 10**: Safety & Permissions
-- [ ] **Phase 11**: Plugin System
+- [x] **Phase 8**: Dynamic Command System (in-chat model switching)
+- [x] **Phase 9**: Feature Parity (11 professional tools, task management)
+- [ ] **Phase 10**: MCP Server Protocol
+- [ ] **Phase 11**: Advanced Safety & Permissions
+- [ ] **Phase 12**: Plugin System
 
 
 
-## Current Status
-
-**Production Ready** - Songbird has completed **Phase 7** with persistent memory and enhanced capabilities.
-
-**What works now:**
-- ✅ **Persistent Memory**: Session management with project-aware storage
-- ✅ **Enhanced Search**: File type filtering, glob patterns, and smart detection
-- ✅ **Dual AI Providers**: Gemini AI and Ollama with seamless switching
-- ✅ **Interactive Tools**: File operations with diff previews and confirmation menus
-- ✅ **Live Shell Execution**: Real-time command output streaming
-- ✅ **Cross-Platform**: Windows, macOS, and Linux support
-- ✅ **Modern CLI**: Rich interface with syntax highlighting and visual feedback
-- ✅ **Comprehensive Test Suite**: >90% coverage with TDD approach
-
-**Coming soon:**
-- MCP Server Protocol integration
-- Advanced model and provider management
-- Enhanced safety and permissions system
-- Multiple LLM providers (OpenAI, Anthropic)
 
 
 ## Troubleshooting

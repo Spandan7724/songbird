@@ -30,6 +30,7 @@ dependencies = [
     "anthropic>=0.45.0",
     "appdirs>=1.4.4",
     "google-genai>=0.5.0",
+    "hatch>=1.14.1",
     "httpx>=0.28.0",
     "inquirerpy>=0.3.4",
     "ollama>=0.5.1",

@@ -552,34 +552,24 @@ RESPONSE FORMATTING GUIDELINES:
                     else:
                         content = f"Successfully edited file: {file_path}"
                 elif function_name == "shell_exec":
-                    # Check if output was displayed live
-                    # Default to True for new shell_exec
+                    # Always provide the actual command output to the LLM
+                    stdout = actual_result.get("stdout", "").strip()
+                    stderr = actual_result.get("stderr", "").strip()
+                    exit_code = actual_result.get("exit_code", 0)
+                    command = actual_result.get("command", "unknown command")
+                    
+                    content = f"Executed command: {command}\nExit code: {exit_code}"
+                    
+                    if stdout:
+                        content += f"\n\nCommand output:\n{stdout}"
+                    if stderr:
+                        content += f"\n\nError output:\n{stderr}"
+                    if not stdout and not stderr:
+                        content += "\n\n(No output produced)"
+                    
+                    # Add note about display if output was shown live
                     if actual_result.get("output_displayed", True):
-                        # Output was already shown, just provide context
-                        exit_code = actual_result.get("exit_code", 0)
-                        command = actual_result.get(
-                            "command", "unknown command")
-
-                        if exit_code == 0:
-                            content = f"The command '{command}' executed successfully and the output was displayed above."
-                        else:
-                            content = f"The command '{command}' failed with exit code {exit_code}. See the output above for details."
-                    else:
-                        # Output wasn't displayed (shouldn't happen with current implementation)
-                        stdout = actual_result.get("stdout", "").strip()
-                        stderr = actual_result.get("stderr", "").strip()
-                        exit_code = actual_result.get("exit_code", 0)
-                        command = actual_result.get(
-                            "command", "unknown command")
-
-                        content = f"Executed command: {command}\nExit code: {exit_code}"
-
-                        if stdout:
-                            content += f"\n\nOutput:\n{stdout}"
-                        if stderr:
-                            content += f"\n\nError output:\n{stderr}"
-                        if not stdout and not stderr:
-                            content += "\n\n(No output produced)"
+                        content += f"\n\n(Note: This output was also displayed to the user above)"
 
                 elif function_name == "file_search":
                     total_matches = actual_result.get("total_matches", 0)
