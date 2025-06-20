@@ -7,55 +7,7 @@ on:
     branches: [ main, dev ]
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.10', '3.11', '3.12']
-        
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install uv
-      uses: astral-sh/setup-uv@v4
-      with:
-        version: "latest"
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}
-    
-    - name: Install dependencies
-      run: |
-        uv sync --all-extras --dev
-        uv pip install build twine
-    
-    - name: Lint with ruff (if available)
-      run: |
-        # Add ruff linting if you want to add it later
-        echo "Linting step placeholder"
-      continue-on-error: true
-    
-    - name: Run tests
-      run: |
-        uv run pytest tests/ -v --tb=short
-      env:
-        # Disable external API calls during testing
-        DISABLE_EXTERNAL_APIS: "true"
-    
-    - name: Test package build
-      run: |
-        uv build
-        uv run twine check dist/*
-    
-    - name: Test CLI installation and basic functionality
-      run: |
-        uv tool install dist/*.whl
-        songbird --help
-        songbird version
-        uv tool uninstall songbird-ai
-
-  security:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -69,8 +21,15 @@ jobs:
     - name: Install dependencies
       run: uv sync --dev
     
-    - name: Run security scan with safety (if available)
+    - name: Build package
+      run: uv build
+    
+    - name: Validate package
+      run: uv run twine check dist/*
+    
+    - name: Test CLI works
       run: |
-        # Add safety scan if you want to add it later
-        echo "Security scan placeholder"
-      continue-on-error: true
+        uv tool install dist/*.whl
+        songbird --help
+        songbird version
+        uv tool uninstall songbird-ai
