@@ -1,7 +1,7 @@
 # songbird/tools/multiedit_tool.py
 """
 MultiEdit tool for atomic multi-file editing operations.
-Provides Claude Code-like multi-file editing functionality for Songbird.
+
 """
 import asyncio
 import json

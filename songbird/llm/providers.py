@@ -622,7 +622,7 @@ class GeminiProvider(BaseProvider):
             # Check if function calls are in candidates content parts (alternative location)
             if hasattr(response, 'candidates') and response.candidates:
                 candidate = response.candidates[0]
-                if hasattr(candidate.content, 'parts'):
+                if hasattr(candidate, 'content') and candidate.content and hasattr(candidate.content, 'parts') and candidate.content.parts:
                     tool_calls = []
                     for part in candidate.content.parts:
                         if hasattr(part, 'function_call') and part.function_call:

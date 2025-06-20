@@ -1,7 +1,7 @@
 # songbird/tools/todo_manager.py
 """
 Todo management system for Songbird sessions.
-Provides intelligent task tracking and management similar to Claude Code.
+
 """
 import json
 import os
@@ -76,7 +76,7 @@ class TodoManager:
         self._load_todos()
     
     def _get_storage_path(self) -> Path:
-        """Get the storage path for todos."""
+        """Get the storage path for todos (session-specific)."""
         # Find project root (git repo or current directory)
         project_root = self._find_project_root()
         
@@ -89,7 +89,12 @@ class TodoManager:
         storage_dir = home / ".songbird" / "projects" / safe_name
         storage_dir.mkdir(parents=True, exist_ok=True)
         
-        return storage_dir / "todos.json"
+        # Use session-specific file if session_id is available
+        if self.session_id:
+            return storage_dir / f"todos-{self.session_id}.json"
+        else:
+            # Fallback to shared file for backward compatibility
+            return storage_dir / "todos.json"
     
     def _find_project_root(self) -> Path:
         """Find the VCS root (git) or use current directory."""
@@ -158,9 +163,11 @@ class TodoManager:
     def get_current_session_todos(self) -> List[TodoItem]:
         """Get todos for the current session."""
         if not self.session_id:
-            # If no session ID, return all recent todos
+            # If no session ID, return all todos from shared file
             return self.get_todos()
         
+        # With session-specific storage, all loaded todos belong to this session
+        # but we'll still filter for extra safety
         return self.get_todos(session_id=self.session_id)
     
     def update_todo(self, todo_id: str, **kwargs) -> bool:
@@ -261,18 +268,10 @@ class TodoManager:
         return suggestions[:3]  # Limit to 3 suggestions
 
 
-def display_todos_table(todos: List[TodoItem], title: str = "Current Tasks"):
-    """Display todos in a formatted table."""
+def display_todos_table(todos: List[TodoItem], title: str = "Current Tasks", show_summary: bool = True):
     if not todos:
         console.print(f"\n[dim]No tasks found[/dim]")
         return
-    
-    # Create table
-    table = Table(title=title, title_style="bold cyan")
-    table.add_column("Priority", style="bold", width=8)
-    table.add_column("Status", style="bold", width=12)
-    table.add_column("Task", style="white", ratio=1)
-    table.add_column("Created", style="dim", width=10)
     
     # Sort by priority and status
     priority_order = {"high": 0, "medium": 1, "low": 2}
@@ -284,52 +283,25 @@ def display_todos_table(todos: List[TodoItem], title: str = "Current Tasks"):
         t.created_at
     ))
     
-    # Add rows
+    # Simple header
+    console.print(f"\n• {title}")
+    
+    # Display each todo as simple bullet points
     for todo in sorted_todos:
-        # Priority styling
-        if todo.priority == "high":
-            priority_style = "bold red"
-            priority_text = "🔴 HIGH"
-        elif todo.priority == "medium":
-            priority_style = "bold yellow"
-            priority_text = "🟡 MED"
-        else:
-            priority_style = "bold green"
-            priority_text = "🟢 LOW"
-        
-        # Status styling
         if todo.status == "completed":
-            status_style = "bold green"
-            status_text = "✅ Done"
-            task_style = "dim"
+            # Completed tasks with strikethrough - using proper Rich markup
+            console.print(f"  [bold green]✓[/bold green] [strike]{todo.content}[/strike]")
         elif todo.status == "in_progress":
-            status_style = "bold blue"
-            status_text = "🔄 Active"
-            task_style = "bold white"
+            # In progress tasks
+            console.print(f"  [bold yellow]◐[/bold yellow] {todo.content}")
         else:
-            status_style = "white"
-            status_text = "⏳ Pending"
-            task_style = "white"
+            # Pending tasks  
+            console.print(f"  ◯ {todo.content}")
+    
+    # Simple summary using the provided todos (caller should pass all relevant todos)
+    if show_summary:
+        completed = len([t for t in todos if t.status == "completed"])
+        pending = len([t for t in todos if t.status == "pending"])
+        in_progress = len([t for t in todos if t.status == "in_progress"])
         
-        # Format created date
-        created_str = todo.created_at.strftime("%m/%d")
-        
-        table.add_row(
-            f"[{priority_style}]{priority_text}[/{priority_style}]",
-            f"[{status_style}]{status_text}[/{status_style}]",
-            f"[{task_style}]{todo.content}[/{task_style}]",
-            f"[dim]{created_str}[/dim]"
-        )
-    
-    # Display in a panel
-    panel = Panel(table, border_style="blue", padding=(1, 2))
-    console.print(panel)
-    
-    # Show summary
-    total = len(todos)
-    completed = len([t for t in todos if t.status == "completed"])
-    in_progress = len([t for t in todos if t.status == "in_progress"])
-    pending = len([t for t in todos if t.status == "pending"])
-    
-    summary = f"[dim]Total: {total} | ✅ {completed} | 🔄 {in_progress} | ⏳ {pending}[/dim]"
-    console.print(f"\n{summary}")
+        console.print(f"\n[dim]{completed} completed, {in_progress} in progress, {pending} pending[/dim]")

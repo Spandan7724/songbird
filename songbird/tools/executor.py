@@ -10,8 +10,9 @@ from .registry import get_tool_function, get_tool_schemas
 class ToolExecutor:
     """Executes tools called by LLMs."""
     
-    def __init__(self, working_directory: str = "."):
+    def __init__(self, working_directory: str = ".", session_id: str = None):
         self.working_directory = working_directory
+        self.session_id = session_id
         
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -35,6 +36,11 @@ class ToolExecutor:
             # Add working directory to file search if not specified
             if tool_name == "file_search" and "directory" not in arguments:
                 arguments["directory"] = self.working_directory
+            
+            # Add session_id to todo tools if not specified
+            if tool_name in ["todo_read", "todo_write"] and "session_id" not in arguments:
+                if self.session_id:
+                    arguments["session_id"] = self.session_id
                 
             # Execute the tool function
             result = await tool_function(**arguments)

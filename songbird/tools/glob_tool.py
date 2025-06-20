@@ -1,7 +1,6 @@
 # songbird/tools/glob_tool.py
 """
 Glob tool for fast file pattern matching.
-Provides Claude Code-like glob functionality for Songbird.
 """
 import glob
 import os

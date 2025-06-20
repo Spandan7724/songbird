@@ -1,7 +1,7 @@
 # songbird/tools/ls_tool.py
 """
 LS tool for enhanced directory listing with Rich formatting.
-Provides Claude Code-like directory listing functionality for Songbird.
+
 """
 import os
 import stat

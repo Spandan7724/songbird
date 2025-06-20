@@ -11,7 +11,8 @@ from rich.console import Console
 from InquirerPy import inquirer
 from .llm.providers import BaseProvider
 from .tools.executor import ToolExecutor
-from .tools.file_operations import display_diff_preview, apply_file_edit
+from .tools.file_operations import display_diff_preview, apply_file_edit, clear_session_read_tracking
+from .tools.todo_tools import auto_complete_todos_from_message
 from .memory.models import Session, Message
 from .memory.manager import SessionManager
 
@@ -112,52 +113,73 @@ class ConversationOrchestrator:
 
     def __init__(self, provider: BaseProvider, working_directory: str = ".", session: Optional[Session] = None):
         self.provider = provider
-        self.tool_executor = ToolExecutor(working_directory)
-        self.conversation_history: List[Dict[str, Any]] = []
         self.session = session
+        # Pass session ID to tool executor for todo functionality
+        session_id = session.id if session else None
+        self.tool_executor = ToolExecutor(working_directory, session_id=session_id)
+        self.conversation_history: List[Dict[str, Any]] = []
         self.session_manager = SessionManager(working_directory)
         self._current_status = None  # Track current status object
+        
+        # Clear file read tracking for new sessions
+        if not session or not session.messages:
+            clear_session_read_tracking()
 
         # Add system prompt to guide the LLM
-        self.system_prompt = """You are Songbird, an AI coding assistant with access to powerful tools for interacting with the file system and terminal.
+        self.system_prompt = """You are Songbird, an AI coding assistant with acc   ess to powerful tools for interacting with the file system and terminal.
 
-IMPORTANT: You have access to the following tools:
+CRITICAL TOOL USAGE RULES:
+You MUST use the appropriate tool for EVERY request. NEVER provide code or explanations as a substitute for tool usage.
+
+MANDATORY TOOL USAGE:
 1. shell_exec - Execute ANY terminal/shell command (ls, dir, pwd, cd, python, git, pip, npm, etc.)
+   - ALWAYS use this for any system command or status check
+   - NEVER claim to know system status without running the command first
 2. file_create - Create new files with content
-3. file_edit - Edit existing files (shows diff before applying) - ALWAYS use this directly when asked to edit, don't show the code first
+   - ALWAYS use this when asked to create, write, or make a new file
+   - NEVER show code instead of creating the file
+3. file_edit - Edit existing files (shows diff before applying)
+   - ALWAYS use this when asked to edit, modify, or change a file
+   - NEVER show code instead of editing the file
 4. file_read - Read file contents
-5. file_search - Fast search using ripgrep:
-   - Find all Python files: Use "*.py"
-   - Find specific file: Use exact name like "test.py" or glob like "*test*.py"
-   - Search text in files: Use any text pattern
-   - Filter by type: Use file_type parameter (py, js, md, etc.)
+   - ALWAYS use this when you need to examine file contents
+   - AUTOMATICALLY use this before any file_edit if the file hasn't been read yet
+5. file_search - Fast search using ripgrep
+6. todo_write - Manage the internal session todo list
+   - ALWAYS use this when creating, updating, or completing todos
+   - NEVER create physical todo.txt files - use the built-in todo system
+   - NOTE: Songbird auto-completes todos when users mention completing tasks. If you see "Auto-completed X todo(s)" or [SYSTEM: Auto-completed...] messages, acknowledge the completions and reference them. DO NOT call todo_read when auto-completion has already shown the updated list
+7. todo_read - Read the current session todo list
+   - ALWAYS use this to check current tasks
 
-When users ask you to:
-- Edit a file → Use file_edit IMMEDIATELY with the new content, don't show the code first
-- Check if a file exists → Use file_search with the exact filename
-- Find files → Use file_search with glob patterns
-- Search for text/code → Use file_search with the text pattern
-- List files/folders → Use shell_exec with 'ls' or 'dir' 
-- Run scripts → Use shell_exec
+ABSOLUTE REQUIREMENTS:
+- When asked to create a file → IMMEDIATELY use file_create, don't show code
+- When asked to edit a file → IMMEDIATELY use file_edit, don't show code  
+- When asked about system status → IMMEDIATELY use shell_exec, don't guess
+- When asked to run commands → IMMEDIATELY use shell_exec, don't explain
+- When asked to create/manage todos → IMMEDIATELY use todo_write, never create txt files
+- When asked to mark todos complete → IMMEDIATELY use todo_write with completed status  
+- When asked to check todos → IMMEDIATELY use todo_read
+- When you see todos already displayed → acknowledge them, don't create duplicates
+- NEVER say "here's the code" - ALWAYS create/edit the actual file
+- NEVER provide manual instructions when tools can do the work
+- NEVER create physical todo.txt files - ALWAYS use the built-in todo system
 
-CRITICAL FILE CREATION RULES:
-- When creating files, ALWAYS generate appropriate filenames automatically based on the content/purpose
-- NEVER ask the user "What should the file be named?" - infer logical names from context
-- Use descriptive, conventional names: calculator.py, add_numbers.cpp, circle_area.py, etc.
-- Match file extensions to the programming language/content type
-- If the user specifies a filename, use it; otherwise generate one immediately
+FILE CREATION RULES:
+- Generate appropriate filenames automatically based on content/purpose
+- Use descriptive names: calculator.py, sphere_volume.py, add_numbers.cpp, etc.
+- Match file extensions to programming language/content type
+- If user specifies filename, use it; otherwise generate immediately
 
-ALWAYS use the appropriate tool when asked to perform file operations or terminal commands. Never say you cannot do something that these tools enable.
+VERIFICATION REQUIREMENT:
+- Before making any claims about system state, file contents, or command output → USE THE APPROPRIATE TOOL FIRST
+- NEVER assume or guess - always verify with tools
 
-When editing files, go straight to using file_edit - the tool will show the diff automatically.
-
-RESPONSE FORMATTING GUIDELINES:
-- When displaying code content, always wrap it in proper markdown code blocks with language specification
-- Use clear, concise language in responses
-- Structure information with headers, bullet points, and proper spacing
-- When showing file contents, provide context about what the file does
-- Keep responses focused and avoid unnecessary repetition
-- Use appropriate technical terminology but explain complex concepts clearly"""
+RESPONSE STYLE:
+- Be direct and action-oriented
+- Use tools immediately when requested
+- Provide brief confirmations after tool execution
+- Keep explanations minimal - let the tools do the work"""
 
         # Initialize conversation history
         if self.session and self.session.messages:
@@ -206,6 +228,37 @@ RESPONSE FORMATTING GUIDELINES:
         """
         # Store the status object
         self._current_status = status
+        
+        # Auto-complete todos based on user message using LLM 
+        if self.session:
+            completed_ids = auto_complete_todos_from_message(message, self.session.id, self.provider)
+            if completed_ids:
+                # Get the completed todo details for context
+                from .tools.todo_manager import TodoManager
+                todo_manager = TodoManager(session_id=self.session.id)
+                completed_todos = []
+                for todo_id in completed_ids:
+                    todo = todo_manager.get_todo_by_id(todo_id)
+                    if todo:
+                        completed_todos.append(todo.content)
+                
+                # Show updated todo list immediately
+                from .tools.todo_tools import todo_read
+                try:
+                    # Display the updated todo list with completed items
+                    await todo_read(session_id=self.session.id, show_completed=True)
+                except Exception:
+                    pass  # If showing todos fails, continue silently
+                
+                # Create context for the LLM about what was auto-completed
+                if completed_todos:
+                    completed_list = "', '".join(completed_todos)
+                    auto_completion_context = f"\n\n[SYSTEM: Auto-completed the following todos: '{completed_list}'. The updated todo list has already been displayed above showing completed tasks with strikethrough. DO NOT call todo_read again - the current status is already visible to the user.]"
+                    Console().print(f"[dim]✓ Auto-completed {len(completed_ids)} todo(s): {completed_list}[/dim]")
+                    
+                    # Add context to the user message so the LLM knows what happened
+                    message += auto_completion_context
+        
         # Add user message to history
         self.conversation_history.append({
             "role": "user",
@@ -237,7 +290,7 @@ RESPONSE FORMATTING GUIDELINES:
             
             # Execute tool calls
             tool_results = []
-            for i, tool_call in enumerate(response.tool_calls):
+            for tool_call in response.tool_calls:
                 # Handle different tool call formats
                 if hasattr(tool_call, 'function'):
                     # Ollama ToolCall objects
@@ -463,8 +516,9 @@ RESPONSE FORMATTING GUIDELINES:
         return self.conversation_history.copy()
 
     def clear_history(self):
-        """Clear the conversation history."""
+        """Clear the conversation history and reset session tracking."""
         self.conversation_history.clear()
+        clear_session_read_tracking()
 
     def _build_messages_for_llm(self) -> List[Dict[str, Any]]:
         """

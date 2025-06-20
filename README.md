@@ -11,7 +11,7 @@
 ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═╝╚═════╝
 </pre>
 
-**A terminal-first AI coding companion with Claude Code feature parity - 11 professional tools, smart task management, and persistent memory**
+**A terminal-first AI coding companion with 11 professional tools, smart task management, and persistent memory**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -74,10 +74,25 @@ songbird --provider ollama --continue
 - **Shell Integration**: `shell_exec` with live output streaming and cross-platform support
 
 ### **Intelligent Task Management**
+- **LLM-Powered Auto-Completion**: Automatically detects and completes tasks from natural language - just say "I implemented the JWT tokens" and the system intelligently marks related todos as complete
 - **Session-Aware Todos**: Create, track, and complete development tasks with automatic priority assignment
 - **Smart Prioritization**: AI analyzes task content to assign appropriate priority levels
-- **Project Isolation**: Each git repository gets separate task storage
-- **Rich Visual Display**: Beautiful tables with status indicators, priorities, and creation dates
+- **Clean Visual Display**: Simple bullet points with strikethrough for completed tasks
+- **Semantic Understanding**: The LLM understands context - "JWT token system" matches "JWT tokens for authentication"
+
+**Smart Todo Management Example:**
+```
+# Create todos naturally
+"I need to implement JWT authentication and user registration"
+✓ Creates: "Implement JWT authentication" and "Add user registration"
+
+# Complete todos intelligently  
+"I finished the JWT token system and it's working"
+✓ Auto-completes: "Implement JWT authentication" (semantic match)
+✓ Shows updated list with strikethrough for completed items
+
+# No manual marking needed - just describe what you did!
+``` 
 
 ### **Advanced File Discovery & Search**
 - **Glob Patterns**: Find files with patterns like `**/*.py`, `src/**/*.js`, `*test*.{py,js}`

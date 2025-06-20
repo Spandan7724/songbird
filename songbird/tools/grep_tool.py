@@ -1,7 +1,6 @@
 # songbird/tools/grep_tool.py
 """
 Grep tool for advanced content search with regex support.
-Provides Claude Code-like grep functionality for Songbird.
 """
 import re
 import asyncio

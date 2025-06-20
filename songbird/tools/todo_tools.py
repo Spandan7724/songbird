@@ -1,11 +1,13 @@
 # songbird/tools/todo_tools.py
 """
 TodoRead and TodoWrite tools for intelligent task management.
-Provides Claude Code-like todo functionality for Songbird.
 """
 import json
 from typing import Dict, Any, List, Optional
+from rich.console import Console
 from .todo_manager import TodoManager, display_todos_table
+
+console = Console()
 
 
 async def todo_read(
@@ -38,6 +40,9 @@ async def todo_read(
         if status:
             todos = [t for t in todos if t.status == status]
         
+        # Store all todos for summary calculation
+        all_todos = todos.copy()
+        
         # Filter out completed unless requested
         if not show_completed:
             todos = [t for t in todos if t.status != "completed"]
@@ -58,14 +63,14 @@ async def todo_read(
             if not show_completed:
                 filter_desc += " (excluding completed)"
             
-            print(f"\n📝 No tasks found{filter_desc}")
+            console.print(f"\n[dim]No tasks found{filter_desc}[/dim]")
         
-        # Prepare summary data
+        # Prepare summary data using all todos, not just displayed ones
         summary = {
-            "total_tasks": len(todos),
-            "pending": len([t for t in todos if t.status == "pending"]),
-            "in_progress": len([t for t in todos if t.status == "in_progress"]),
-            "completed": len([t for t in todos if t.status == "completed"])
+            "total_tasks": len(all_todos),
+            "pending": len([t for t in all_todos if t.status == "pending"]),
+            "in_progress": len([t for t in all_todos if t.status == "in_progress"]),
+            "completed": len([t for t in all_todos if t.status == "completed"])
         }
         
         # Convert todos to simple format for LLM
@@ -217,10 +222,9 @@ async def todo_write(
         # Get updated todo list for display
         current_todos = todo_manager.get_current_session_todos()
         
-        # Filter out completed for display unless there are only completed tasks
-        display_todos = [t for t in current_todos if t.status != "completed"]
-        if not display_todos and current_todos:
-            display_todos = current_todos  # Show completed if that's all we have
+        # Always show all todos (including completed ones) after an update
+        # This way users can see what was completed
+        display_todos = current_todos
         
         # Display updated todos
         if display_todos:
@@ -272,38 +276,135 @@ def extract_todos_from_text(text: str) -> List[str]:
     return todo_manager.generate_smart_todos(text)
 
 
-def auto_complete_todos_from_message(message: str, session_id: Optional[str] = None) -> List[str]:
+async def llm_auto_complete_todos(message: str, session_id: Optional[str] = None, llm_provider=None) -> List[str]:
     """
-    Automatically detect and complete todos based on user message.
+    Use LLM to intelligently detect which todos were completed based on user message.
     Returns list of completed todo IDs.
     """
+    if not llm_provider:
+        return []  # Fallback to no completion if no LLM available
+    
     completed_ids = []
     
     try:
         todo_manager = TodoManager(session_id=session_id)
-        active_todos = todo_manager.get_todos(status="in_progress")
+        # Check both pending and in_progress todos for completion
+        active_todos = (
+            todo_manager.get_todos(status="in_progress") + 
+            todo_manager.get_todos(status="pending")
+        )
         
-        # Look for completion keywords
-        completion_keywords = [
-            "done", "finished", "completed", "fixed", "implemented", 
-            "resolved", "merged", "deployed", "working"
-        ]
+        if not active_todos:
+            return []
         
-        message_lower = message.lower()
-        
+        # Create a structured prompt for the LLM
+        todos_list = []
         for todo in active_todos:
-            # Check if todo content is mentioned in the message
-            todo_words = todo.content.lower().split()
+            todos_list.append(f'"{todo.id}": "{todo.content}"')
+        
+        todos_json = "{\n  " + ",\n  ".join(todos_list) + "\n}"
+        
+        prompt = f"""Analyze this user message to determine which todos were completed:
+
+User message: "{message}"
+
+Current todos:
+{todos_json}
+
+Task: Identify which todo IDs were completed/finished based on the user's message.
+
+Rules:
+- Look for completion indicators: "finished", "completed", "done", "implemented", "fixed", "working", etc.
+- Match todo content semantically (e.g., "JWT token system" matches "JWT tokens")  
+- Only return IDs of todos that were clearly completed
+- If no todos were completed, return empty array
+
+Return ONLY a JSON array of completed todo IDs:
+["id1", "id2"]"""
+
+        try:
+            # Use the LLM to analyze the message
+            response = llm_provider.chat(prompt)
+            response_text = response.content.strip()
             
-            # If multiple words from todo are mentioned along with completion keywords
-            matching_words = sum(1 for word in todo_words if word in message_lower)
-            has_completion_keyword = any(keyword in message_lower for keyword in completion_keywords)
+            # Extract JSON from response (handle potential markdown formatting)
+            import re
+            json_match = re.search(r'\[.*?\]', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                completed_todo_ids = json.loads(json_str)
+                
+                # Validate and complete the todos
+                for todo_id in completed_todo_ids:
+                    if todo_manager.complete_todo(todo_id):
+                        completed_ids.append(todo_id)
             
-            if matching_words >= 2 and has_completion_keyword:
-                todo_manager.complete_todo(todo.id)
-                completed_ids.append(todo.id)
+        except Exception as e:
+            # If LLM parsing fails, fall back to simple keyword detection
+            console.print(f"[dim]LLM auto-completion failed, using fallback: {e}[/dim]")
+            return await fallback_auto_complete_todos(message, session_id)
         
     except Exception:
         pass  # Silently fail for auto-completion
     
     return completed_ids
+
+
+async def fallback_auto_complete_todos(message: str, session_id: Optional[str] = None) -> List[str]:
+    """
+    Fallback auto-completion using simple keyword matching.
+    Used when LLM-based completion fails.
+    """
+    completed_ids = []
+    
+    try:
+        todo_manager = TodoManager(session_id=session_id)
+        active_todos = (
+            todo_manager.get_todos(status="in_progress") + 
+            todo_manager.get_todos(status="pending")
+        )
+        
+        # Simple completion keywords
+        completion_keywords = [
+            "done", "finished", "completed", "fixed", "implemented", 
+            "resolved", "working", "solved"
+        ]
+        
+        message_lower = message.lower()
+        has_completion_keyword = any(keyword in message_lower for keyword in completion_keywords)
+        
+        if has_completion_keyword:
+            for todo in active_todos:
+                todo_content_lower = todo.content.lower()
+                # Simple direct substring match
+                if todo_content_lower in message_lower:
+                    todo_manager.complete_todo(todo.id)
+                    completed_ids.append(todo.id)
+        
+    except Exception:
+        pass
+    
+    return completed_ids
+
+
+def auto_complete_todos_from_message(message: str, session_id: Optional[str] = None, llm_provider=None) -> List[str]:
+    """
+    Compatibility wrapper for the LLM-based auto-completion.
+    Returns list of completed todo IDs.
+    """
+    import asyncio
+    
+    # Run the async LLM-based completion
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If we're already in an async context, create a task
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, llm_auto_complete_todos(message, session_id, llm_provider))
+                return future.result()
+        else:
+            return asyncio.run(llm_auto_complete_todos(message, session_id, llm_provider))
+    except Exception:
+        # If async fails, use the fallback
+        return asyncio.run(fallback_auto_complete_todos(message, session_id))

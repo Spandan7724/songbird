@@ -12,6 +12,21 @@ from rich.panel import Panel
 
 console = Console()
 
+# Session-level tracking of read files
+_session_read_files = set()
+
+def mark_file_as_read(file_path: str):
+    """Mark a file as read in the current session."""
+    _session_read_files.add(str(Path(file_path).resolve()))
+
+def was_file_read_in_session(file_path: str) -> bool:
+    """Check if a file was read in the current session."""
+    return str(Path(file_path).resolve()) in _session_read_files
+
+def clear_session_read_tracking():
+    """Clear the session read tracking (for new sessions)."""
+    _session_read_files.clear()
+
 
 def _get_lexer_from_filename(filename: str) -> str:
     """Get appropriate lexer based on file extension."""
@@ -138,6 +153,9 @@ async def file_read(file_path: str, lines: Optional[int] = None, start_line: Opt
         
         content = ''.join(selected_lines)
         
+        # Mark file as read in current session
+        mark_file_as_read(file_path)
+        
         return {
             "success": True,
             "file_path": str(path),
@@ -162,6 +180,7 @@ async def file_read(file_path: str, lines: Optional[int] = None, start_line: Opt
 async def file_edit(file_path: str, new_content: str, create_backup: bool = False) -> Dict[str, Any]:
     """
     Edit file with diff preview and confirmation.
+    Automatically reads the file first if it hasn't been read in this session.
     
     Args:
         file_path: Path to file to edit
@@ -173,6 +192,17 @@ async def file_edit(file_path: str, new_content: str, create_backup: bool = Fals
     """
     try:
         path = Path(file_path)
+        
+        # Check if file exists and hasn't been read in this session
+        if path.exists() and not was_file_read_in_session(file_path):
+            console.print(f"[dim]Reading file before editing: {file_path}[/dim]")
+            read_result = await file_read(file_path)
+            if not read_result.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Could not read file before editing: {read_result.get('error', 'Unknown error')}"
+                }
+            console.print(f"[dim]File content loaded ({read_result.get('lines_returned', 0)} lines)[/dim]")
         
         # Read existing content if file exists
         old_content = ""
