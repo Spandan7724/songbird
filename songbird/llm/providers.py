@@ -49,7 +49,7 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 try:
-    import httpx
+    import httpx  # noqa: F401
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
@@ -765,7 +765,7 @@ def get_provider_info() -> Dict[str, Dict[str, Any]]:
                     info["models"] = [model['name'] for model in models[:5]]  # Limit to first 5
                 else:
                     info["models"] = ["qwen2.5-coder:7b", "devstral:latest", "llama3.2:latest"]
-            except:
+            except Exception:
                 info["models"] = ["qwen2.5-coder:7b", "devstral:latest", "llama3.2:latest"]
             
             info["api_key_env"] = None
@@ -791,7 +791,7 @@ def get_provider_info() -> Dict[str, Dict[str, Any]]:
                             chat_models.append(model.id)
                     
                     info["models"] = sorted(chat_models)[:5] if chat_models else ["gpt-4o", "gpt-4o-mini"]
-                except:
+                except Exception:
                     info["models"] = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]
             else:
                 info["models"] = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]

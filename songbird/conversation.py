@@ -8,13 +8,9 @@ import os
 import sys
 from typing import List, Dict, Any, Optional
 from rich.console import Console
-from rich.prompt import Confirm
-from rich.live import Live
-from rich.table import Table
 from InquirerPy import inquirer
 from .llm.providers import BaseProvider
 from .tools.executor import ToolExecutor
-from .tools.registry import get_tool_schemas
 from .tools.file_operations import display_diff_preview, apply_file_edit
 from .memory.models import Session, Message
 from .memory.manager import SessionManager
@@ -22,28 +18,94 @@ from .memory.manager import SessionManager
 
 async def safe_interactive_menu(prompt: str, options: list[str], default_index: int = 0) -> int | None:
     """
-    Async, up/down arrow-key menu with graceful Ctrl+C handling.
+    Async-safe interactive menu that handles all scenarios properly.
     Returns the selected index, or None if cancelled.
     """
     try:
-        return await asyncio.to_thread(
-            interactive_menu,
-            prompt,
-            options,
-            default_index
-        )
+        # Check if we're in an interactive terminal
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            # Non-interactive environment - auto-select default
+            console = Console()
+            console.print(f"\n{prompt}")
+            for i, option in enumerate(options):
+                marker = "▶ " if i == default_index else "  "
+                console.print(f"{marker}{option}")
+            console.print(f"[dim]Auto-selected: {options[default_index]}[/dim]")
+            return default_index
+        
+        # Try the async InquirerPy API first
+        return await async_interactive_menu(prompt, options, default_index)
     except KeyboardInterrupt:
         print("\nOperation cancelled by user.")
         return None
 
+async def async_interactive_menu(prompt: str, options: list[str], default_index: int = 0) -> int:
+    """
+    Async interactive menu using InquirerPy's execute_async() method.
+    This is the CORRECT way to use InquirerPy within an existing event loop.
+    """
+    try:
+        # Use InquirerPy's async API - this is the key fix!
+        result = await inquirer.select(
+            message=prompt,
+            choices=options,
+            default=options[default_index] if 0 <= default_index < len(options) else options[0]
+        ).execute_async()
+        return options.index(result)
+    except Exception:
+        # If async fails for any reason, fall back to synchronous
+        print("Async menu failed, falling back to simple menu...")
+        return fallback_numbered_menu(prompt, options, default_index)
+
+def fallback_numbered_menu(prompt: str, options: list[str], default_index: int = 0) -> int:
+    """Fallback numbered menu for when InquirerPy fails."""
+    console = Console()
+    
+    # Check if we can actually read from stdin
+    if not sys.stdin.isatty():
+        console.print(f"\n{prompt}")
+        for i, option in enumerate(options):
+            style = "bold green" if i == default_index else "white"
+            console.print(f"  {i + 1}. {option}", style=style)
+        console.print(f"[dim]Auto-selected option {default_index + 1}: {options[default_index]}[/dim]")
+        return default_index
+    
+    console.print(f"\n{prompt}")
+    for i, option in enumerate(options):
+        style = "bold green" if i == default_index else "white"
+        console.print(f"  {i + 1}. {option}", style=style)
+    
+    while True:
+        try:
+            choice = input(f"\nSelect option (1-{len(options)}, default={default_index + 1}): ").strip()
+            
+            if not choice:
+                return default_index
+            
+            choice_num = int(choice) - 1
+            if 0 <= choice_num < len(options):
+                return choice_num
+            else:
+                console.print(f"Invalid choice. Please select 1-{len(options)}", style="red")
+        except ValueError:
+            console.print("Invalid input. Please enter a number.", style="red")
+        except (KeyboardInterrupt, EOFError):
+            # Handle both Ctrl+C and EOF (no input available)
+            return default_index
+
 def interactive_menu(prompt: str, options: list[str], default_index: int = 0) -> int:
-    """Synchronous up/down menu, returns index of selected item."""
-    result = inquirer.select(
-        message=prompt,
-        choices=options,
-        default=options[default_index] if 0 <= default_index < len(options) else options[0]
-    ).execute()
-    return options.index(result)
+    """Synchronous compatibility function for CLI usage."""
+    try:
+        # Use InquirerPy's synchronous execute() method for CLI
+        result = inquirer.select(
+            message=prompt,
+            choices=options,
+            default=options[default_index] if 0 <= default_index < len(options) else options[0]
+        ).execute()
+        return options.index(result)
+    except Exception:
+        # Fall back to numbered menu
+        return fallback_numbered_menu(prompt, options, default_index)
 
 class ConversationOrchestrator:
     """Orchestrates conversations between user, LLM, and tools."""

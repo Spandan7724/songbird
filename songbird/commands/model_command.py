@@ -3,8 +3,7 @@
 Simplified model switching command with clean display.
 """
 
-from typing import Dict, Any, List, Optional
-from rich.console import Console
+from typing import Dict, Any, List
 from .base import BaseCommand, CommandResult
 
 
@@ -143,7 +142,7 @@ class ModelCommand(BaseCommand):
             if response.status_code == 200:
                 models = response.json().get('models', [])
                 return [model['name'] for model in models]
-        except:
+        except Exception:
             pass
 
         # Fallback to common models

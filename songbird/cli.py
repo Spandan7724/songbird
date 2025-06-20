@@ -11,21 +11,17 @@ from datetime import datetime
 import json
 import typer
 from rich.console import Console
-from rich.prompt import Prompt
 from rich.status import Status
-from rich.live import Live
-from rich.table import Table
-from rich.table import Table
 from rich.panel import Panel
 from rich.syntax import Syntax
 from . import __version__
-from .llm.providers import get_provider, list_available_providers, get_default_provider
-from .conversation import ConversationOrchestrator, safe_interactive_menu
+from .llm.providers import get_provider, get_default_provider
+from .conversation import ConversationOrchestrator
 from .memory.manager import SessionManager
 from .memory.models import Session
-from .commands import CommandSelector, get_command_registry, CommandInputHandler
+from .commands import CommandInputHandler, get_command_registry
 from .memory.history_manager import MessageHistoryManager
-from .commands.loader import load_all_commands, is_command_input, parse_command_input
+from .commands.loader import is_command_input, parse_command_input, load_all_commands
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich",
                   help="Songbird - Terminal-first AI coding companion", no_args_is_help=False)
@@ -135,7 +131,7 @@ def format_time_ago(dt: datetime) -> str:
         return "just now"
 
 
-async def display_session_selector(sessions: list[Session]) -> Optional[Session]:
+def display_session_selector(sessions: list[Session]) -> Optional[Session]:
     """Display an interactive session selector with better terminal handling."""
     if not sessions:
         console.print("No previous sessions found.", style="yellow")
@@ -166,15 +162,16 @@ async def display_session_selector(sessions: list[Session]) -> Optional[Session]
     if len(sessions) > max_sessions:
         console.print(f"[yellow]Showing {max_sessions} most recent sessions out of {len(sessions)} total[/yellow]\n")
     
-    # Use interactive menu
-    selected_idx = await safe_interactive_menu(
-        "Select a session to resume:",
-        options,
-        default_index=0
-    )
-    
-    if selected_idx is None:
-        # User cancelled, return None to indicate cancellation
+    # Use interactive menu (synchronous)
+    from .conversation import interactive_menu
+    try:
+        selected_idx = interactive_menu(
+            "Select a session to resume:",
+            options,
+            default_index=0
+        )
+    except KeyboardInterrupt:
+        console.print("\nOperation cancelled by user.")
         return None
     
     if selected_idx == len(display_sessions):
@@ -187,8 +184,6 @@ def replay_conversation(session: Session):
     """Replay the conversation history to show it as the user saw it."""
     # Import here to avoid circular dependency
     from .tools.file_operations import display_diff_preview
-    from rich.panel import Panel
-    from rich.syntax import Syntax
 
     # Group messages with their tool calls and results
     i = 0
@@ -209,7 +204,7 @@ def replay_conversation(session: Session):
             if msg.tool_calls:
                 # Show thinking message
                 console.print(
-                    f"\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
+                    "\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
 
                 # Track tool index for matching with tool results
                 tool_result_idx = i + 1
@@ -467,7 +462,7 @@ def chat(
     elif resume_session:
         sessions = session_manager.list_sessions()
         if sessions:
-            selected_session = asyncio.run(display_session_selector(sessions))
+            selected_session = display_session_selector(sessions)
             if selected_session:
                 session = session_manager.load_session(selected_session.id)
                 if session:
@@ -508,17 +503,13 @@ def chat(
     console.print(
         "Type [spring_green1]'/'[/spring_green1] for commands, or [spring_green1]'exit'[/spring_green1] to quit.\n", style="dim")
 
-    # Load command system
-    command_registry = load_all_commands()
-    command_selector = CommandSelector(command_registry, console)
-    
-    # Create session manager for history
-    session_manager = SessionManager(os.getcwd())
+
     
     # Create history manager (will be passed to input handler after orchestrator is created)
     history_manager = MessageHistoryManager(session_manager)
     
-    # Create input handler with history support
+    # Create command registry and load all commands
+    command_registry = load_all_commands()
     command_input_handler = CommandInputHandler(command_registry, console, history_manager)
 
     # Determine provider and model
@@ -606,7 +597,7 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
     while True:
         try:
             # Get user input
-            user_input = command_input_handler.get_input_with_commands("You")
+            user_input = await command_input_handler.get_input_with_commands("You")
             
             if user_input.lower() in ["exit", "quit", "bye"]:
                 console.print("\nGoodbye!", style="bold blue")
@@ -648,8 +639,7 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                                 orchestrator.session_manager.save_session(
                                     orchestrator.session)
                             # Invalidate history cache since we cleared messages
-                            if command_input_handler.history_manager:
-                                command_input_handler.history_manager.invalidate_cache()
+                            command_input_handler.invalidate_history_cache()
                         
                         if result.data.get("new_model"):
                             # Model was changed, update display and save to session
@@ -703,8 +693,7 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
                 console.print(f"[medium_spring_green]Songbird[/medium_spring_green]: {response}")
                 
             # Invalidate history cache
-            if command_input_handler.history_manager:
-                command_input_handler.history_manager.invalidate_cache()
+            command_input_handler.invalidate_history_cache()
                 
         except KeyboardInterrupt:
             console.print("\nGoodbye!", style="bold blue")

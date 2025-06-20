@@ -4,7 +4,6 @@ Help command for displaying available commands and usage information.
 """
 
 from typing import Dict, Any
-from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from .base import BaseCommand, CommandResult

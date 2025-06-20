@@ -3,9 +3,8 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from datetime import datetime
-import uuid
 
 from .models import Session, Message
 
@@ -30,7 +29,7 @@ class SessionManager:
                 check=True
             )
             return Path(result.stdout.strip()).resolve()
-        except:
+        except Exception:
             # Not a git repo or git not available, use current directory
             return self.working_directory
     
@@ -143,9 +142,6 @@ class SessionManager:
 
                 data = json.loads(first_line)
                 if data.get("type") == "metadata":
-                    # Count messages by counting remaining lines
-                    message_count = sum(1 for _ in f)
-
                     session = Session(
                         id=data["id"],
                         created_at=datetime.fromisoformat(data["created_at"]),
@@ -156,8 +152,9 @@ class SessionManager:
                             "provider_config", {})  # ADD THIS LINE
                     )
 
-                    # Add dummy messages for count (we don't load all messages for listing)
-                    session.messages = [None] * message_count  # type: ignore
+                    # Don't load messages for listing - keep empty for metadata only
+                    # The message count is available but messages should be loaded separately
+                    session.messages = []
 
                     sessions.append(session)
 
