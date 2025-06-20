@@ -4,49 +4,12 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., v0.1.1)'
-        required: true
-        type: string
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install uv
-      uses: astral-sh/setup-uv@v4
-    
-    - name: Set up Python
-      run: uv python install 3.12
-    
-    - name: Install dependencies
-      run: uv sync --all-extras --dev
-    
-    - name: Run tests
-      run: uv run pytest tests/ -v
-    
-    - name: Build package
-      run: uv build
-    
-    - name: Validate package
-      run: uv run twine check dist/*
-
   release:
-    needs: test
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write  # For trusted publishing
-      contents: write  # For creating releases
-      
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Get full history for changelog
     
     - name: Install uv
       uses: astral-sh/setup-uv@v4
@@ -60,62 +23,17 @@ jobs:
     - name: Build package
       run: uv build
     
+    - name: Validate package
+      run: uv run twine check dist/*
+    
     - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
-        skip-existing: true
-    
-    - name: Get version from tag
-      id: get_version
       run: |
-        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          VERSION="${{ github.event.inputs.version }}"
-        else
-          VERSION=${GITHUB_REF#refs/tags/}
-        fi
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "version_number=${VERSION#v}" >> $GITHUB_OUTPUT
-    
-    - name: Generate changelog
-      id: changelog
-      run: |
-        if [ -f CHANGELOG.md ]; then
-          # Extract changelog for this version
-          CHANGELOG=$(awk '/^## \[${{ steps.get_version.outputs.version_number }}\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md || echo "")
-        else
-          # Generate basic changelog from git
-          CHANGELOG=$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo HEAD~10)..HEAD || echo "- Initial release")
-        fi
-        
-        # Write changelog to file for multiline handling
-        cat << 'EOF' > /tmp/changelog.md
-        $CHANGELOG
-        EOF
-        
-        echo "changelog_file=/tmp/changelog.md" >> $GITHUB_OUTPUT
+        uv publish --token ${{ secrets.PYPI_API_TOKEN }} dist/*
     
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ steps.get_version.outputs.version }}
-        name: Release ${{ steps.get_version.outputs.version }}
-        body_path: ${{ steps.changelog.outputs.changelog_file }}
         files: |
           dist/*.whl
           dist/*.tar.gz
-        draft: false
-        prerelease: ${{ contains(steps.get_version.outputs.version, 'alpha') || contains(steps.get_version.outputs.version, 'beta') || contains(steps.get_version.outputs.version, 'rc') }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  notify:
-    needs: [test, release]
-    runs-on: ubuntu-latest
-    if: success()
-    steps:
-    - name: Notify success
-      run: |
-        echo "✅ Successfully released Songbird ${{ needs.release.outputs.version || github.ref_name }} to PyPI!"
-        echo "📦 Package: https://pypi.org/project/songbird-ai/"
-        echo "🚀 GitHub Release: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+        generate_release_notes: true
