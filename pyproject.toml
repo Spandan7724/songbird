@@ -71,3 +71,8 @@ python_functions = ["test_*"]
 [tool.pyrefly]
 project-includes = ["**/*"]
 project-excludes = ["**/*venv/**/*"]
+
+[dependency-groups]
+dev = [
+    "twine>=6.1.0",
+]

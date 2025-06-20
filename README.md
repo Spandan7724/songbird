@@ -19,7 +19,26 @@
 
 </div>
 
+
+## Downloading
+
+### With uv (recommended)
+```bash
+uv tool install songbird-ai
+```
+### With pipx (if available)
+```bash
+pipx install songbird-ai
+```
+### With pip (traditional)
+```bash
+pip install songbird-ai
+```
+
+
 ## Quick Start
+
+
 
 ### Option 1: With Gemini (Recommended)
 
