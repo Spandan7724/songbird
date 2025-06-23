@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "songbird-ai"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A terminal-first AI coding companion that runs on local LLMs"
 readme = "README.md"
 license = "MIT"
