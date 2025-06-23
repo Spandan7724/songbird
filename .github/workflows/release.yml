@@ -27,8 +27,7 @@ jobs:
       run: uv run twine check dist/*
     
     - name: Publish to PyPI
-      run: |
-        uv publish --token ${{ secrets.PYPI_API_TOKEN }} dist/*
+      run: uv publish --token ${{ secrets.PYPI_API_TOKEN }} dist/*
     
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
