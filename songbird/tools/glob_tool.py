@@ -1,14 +1,12 @@
 # songbird/tools/glob_tool.py
 """
-Glob tool for fast file pattern matching.
+Glob tool for fast file pattern matching with minimal output.
 """
 import glob
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
 
 console = Console()
 
@@ -40,14 +38,20 @@ async def glob_pattern(
             return {
                 "success": False,
                 "error": f"Directory not found: {directory}",
-                "matches": []
+                "matches": [],
+                "count": 0,
+                "file_count": 0,
+                "dir_count": 0
             }
         
         if not dir_path.is_dir():
             return {
                 "success": False,
                 "error": f"Path is not a directory: {directory}",
-                "matches": []
+                "matches": [],
+                "count": 0,
+                "file_count": 0,
+                "dir_count": 0
             }
         
         # Prepare the search pattern
@@ -57,9 +61,8 @@ async def glob_pattern(
         else:
             search_pattern = pattern
         
-        console.print(f"\n[bold cyan]Searching for pattern:[/bold cyan] {pattern}")
-        console.print(f"[dim]Directory: {dir_path}[/dim]")
-        console.print(f"[dim]Full pattern: {search_pattern}[/dim]\n")
+        # Minimal output
+        console.print(f"[dim]Searching: {pattern} in {dir_path}[/dim]")
         
         # Use glob to find matches
         matches = []
@@ -107,31 +110,25 @@ async def glob_pattern(
                 "is_dir": match_file.is_dir(),
             }
             
-            # Add file size and modification time for files
+            # Add file size for files
             if match_file.is_file():
                 try:
                     stat = match_file.stat()
-                    file_info.update({
-                        "size": stat.st_size,
-                        "size_human": _format_file_size(stat.st_size),
-                        "modified": stat.st_mtime,
-                        "modified_human": _format_modification_time(stat.st_mtime)
-                    })
+                    file_info["size"] = stat.st_size
                 except Exception:
-                    file_info.update({
-                        "size": 0,
-                        "size_human": "unknown",
-                        "modified": 0,
-                        "modified_human": "unknown"
-                    })
+                    file_info["size"] = 0
             
             matches.append(file_info)
         
         # Sort matches by path for consistent output
         matches.sort(key=lambda x: x["path"])
         
-        # Display results
-        _display_glob_results(matches, pattern, len(glob_matches) > max_results)
+        # Count files and directories
+        file_count = len([m for m in matches if m["is_file"]])
+        dir_count = len([m for m in matches if m["is_dir"]])
+        
+        # Display minimal results
+        _display_minimal_results(matches, pattern, len(glob_matches), file_count, dir_count)
         
         return {
             "success": True,
@@ -140,144 +137,68 @@ async def glob_pattern(
             "matches": matches,
             "total_found": len(glob_matches),
             "total_returned": len(matches),
-            "truncated": len(glob_matches) > max_results,
-            "display_shown": True
+            "file_count": file_count,
+            "dir_count": dir_count,
+            "count": len(matches),  # Total count for easy access
+            "truncated": len(glob_matches) > max_results
         }
         
     except Exception as e:
         return {
             "success": False,
             "error": f"Error in glob search: {e}",
-            "matches": []
+            "matches": [],
+            "count": 0,
+            "file_count": 0,
+            "dir_count": 0
         }
 
 
-def _format_file_size(size_bytes: int) -> str:
-    """Format file size in human-readable format."""
-    if size_bytes == 0:
-        return "0 B"
-    
-    size_names = ["B", "KB", "MB", "GB", "TB"]
-    i = 0
-    size = float(size_bytes)
-    
-    while size >= 1024.0 and i < len(size_names) - 1:
-        size /= 1024.0
-        i += 1
-    
-    if i == 0:
-        return f"{int(size)} {size_names[i]}"
-    else:
-        return f"{size:.1f} {size_names[i]}"
-
-
-def _format_modification_time(timestamp: float) -> str:
-    """Format modification time in human-readable format."""
-    import datetime
-    try:
-        dt = datetime.datetime.fromtimestamp(timestamp)
-        now = datetime.datetime.now()
-        
-        # If within last 24 hours, show time
-        if (now - dt).days == 0:
-            return dt.strftime("%H:%M")
-        # If within last week, show day and time
-        elif (now - dt).days < 7:
-            return dt.strftime("%a %H:%M")
-        # Otherwise show date
-        else:
-            return dt.strftime("%m/%d/%y")
-    except Exception:
-        return "unknown"
-
-
-def _display_glob_results(matches: List[Dict[str, Any]], pattern: str, truncated: bool):
-    """Display glob results in a formatted table."""
+def _display_minimal_results(matches: List[Dict[str, Any]], pattern: str, total_found: int, file_count: int, dir_count: int):
+    """Display glob results in minimal format."""
     if not matches:
         console.print("[yellow]No matches found[/yellow]")
         return
     
-    # Create table
-    table = Table(
-        title=f"Found {len(matches)} matches for pattern '{pattern}'"
-    )
-    table.add_column("Type", style="bold", width=6)
-    table.add_column("Name", style="cyan", ratio=1)
-    table.add_column("Size", style="green", justify="right", width=8)
-    table.add_column("Modified", style="dim", width=10)
-    table.add_column("Path", style="white", ratio=1)
+    # Show count summary
+    summary_parts = []
+    if file_count > 0:
+        summary_parts.append(f"{file_count} files")
+    if dir_count > 0:
+        summary_parts.append(f"{dir_count} directories")
     
-    # Add rows
-    for match in matches:
-        # Type indicator
-        if match["is_dir"]:
-            type_indicator = "📁 DIR"
-            type_style = "bold blue"
-            size_display = "—"
-            modified_display = "—"
-        else:
-            type_indicator = "📄 FILE"
-            type_style = "white"
-            size_display = match.get("size_human", "—")
-            modified_display = match.get("modified_human", "—")
-        
-        # Directory path (parent directory)
-        full_path = Path(match["path"])
-        if len(full_path.parts) > 1:
-            dir_path = str(full_path.parent)
-        else:
-            dir_path = "."
-        
-        table.add_row(
-            f"[{type_style}]{type_indicator}[/{type_style}]",
-            f"[bold]{match['name']}[/bold]",
-            size_display,
-            modified_display,
-            f"[dim]{dir_path}[/dim]"
-        )
+    console.print(f"\n[green]Found {' and '.join(summary_parts)} matching '{pattern}'[/green]")
     
-    # Show truncation warning if needed
-    if truncated:
-        table.add_row(
-            "[dim]...[/dim]",
-            "[dim]More results available[/dim]",
-            "[dim]...[/dim]",
-            "[dim]...[/dim]",
-            "[dim]Increase max_results to see more[/dim]"
-        )
+    # Simple list format
+    console.print()
+    for i, match in enumerate(matches[:20]):  # Limit display to 20 items
+        # Simple type indicator
+        type_char = "D" if match["is_dir"] else "F"
+        size_str = ""
+        if match["is_file"] and "size" in match:
+            size_str = f" {_format_size(match['size'])}"
+        
+        # Clean path display
+        style = "blue" if match["is_dir"] else "white"
+        console.print(f"  [{type_char}] [{style}]{match['path']}[/{style}]{size_str}")
     
-    # Display in a panel
-    panel = Panel(table, border_style="cyan", padding=(1, 2))
-    console.print(panel)
+    if len(matches) > 20:
+        console.print(f"  ... and {len(matches) - 20} more")
     
-    # Show file type summary
-    if len(matches) > 5:
-        files = [m for m in matches if m["is_file"]]
-        dirs = [m for m in matches if m["is_dir"]]
-        
-        summary_parts = []
-        if files:
-            summary_parts.append(f"📄 {len(files)} files")
-        if dirs:
-            summary_parts.append(f"📁 {len(dirs)} directories")
-        
-        if summary_parts:
-            console.print(f"\n[bold]Summary:[/bold] {', '.join(summary_parts)}")
-        
-        # Show file extension breakdown for files
-        if files:
-            extensions = {}
-            for file_match in files:
-                ext = Path(file_match["name"]).suffix.lower()
-                if not ext:
-                    ext = "(no extension)"
-                extensions[ext] = extensions.get(ext, 0) + 1
-            
-            if len(extensions) > 1:
-                ext_summary = []
-                for ext, count in sorted(extensions.items(), key=lambda x: x[1], reverse=True)[:5]:
-                    ext_summary.append(f"{ext}: {count}")
-                console.print(f"[dim]Extensions: {', '.join(ext_summary)}[/dim]")
+    if total_found > len(matches):
+        console.print(f"\n[dim]Note: Results limited to {len(matches)} of {total_found} total matches[/dim]")
+
+
+def _format_size(size_bytes: int) -> str:
+    """Simple size formatting."""
+    if size_bytes < 1024:
+        return f"{size_bytes}B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f}KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f}MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"
 
 
 # Additional helper functions for advanced glob operations
@@ -324,6 +245,9 @@ async def glob_exclude(
     # Update result
     result["matches"] = filtered_matches
     result["total_returned"] = len(filtered_matches)
+    result["file_count"] = len([m for m in filtered_matches if m["is_file"]])
+    result["dir_count"] = len([m for m in filtered_matches if m["is_dir"]])
+    result["count"] = len(filtered_matches)
     result["excluded_patterns"] = exclude_patterns
     
     return result
@@ -361,11 +285,17 @@ async def glob_multiple(
     # Sort combined results
     all_matches.sort(key=lambda x: x["path"])
     
+    # Count files and directories
+    file_count = len([m for m in all_matches if m["is_file"]])
+    dir_count = len([m for m in all_matches if m["is_dir"]])
+    
     return {
         "success": True,
         "patterns": patterns,
         "directory": directory,
         "matches": all_matches,
         "total_returned": len(all_matches),
-        "display_shown": True
+        "file_count": file_count,
+        "dir_count": dir_count,
+        "count": len(all_matches)
     }

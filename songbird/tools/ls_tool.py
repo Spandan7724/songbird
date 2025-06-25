@@ -1,7 +1,6 @@
 # songbird/tools/ls_tool.py
 """
-LS tool for enhanced directory listing with Rich formatting.
-
+LS tool for directory listing with minimal formatting.
 """
 import os
 import stat
@@ -9,9 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.text import Text
 
 console = Console()
 
@@ -27,7 +23,7 @@ async def ls_directory(
     file_type_filter: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    List directory contents with enhanced formatting and options.
+    List directory contents with minimal formatting.
     
     Args:
         path: Directory path to list (default: current directory)
@@ -49,17 +45,23 @@ async def ls_directory(
             return {
                 "success": False,
                 "error": f"Directory not found: {path}",
-                "entries": []
+                "entries": [],
+                "file_count": 0,
+                "dir_count": 0,
+                "total_count": 0
             }
         
         if not dir_path.is_dir():
             return {
                 "success": False,
                 "error": f"Path is not a directory: {path}",
-                "entries": []
+                "entries": [],
+                "file_count": 0,
+                "dir_count": 0,
+                "total_count": 0
             }
         
-        console.print(f"\n[bold cyan]Directory listing:[/bold cyan] {dir_path}")
+        console.print(f"[dim]{dir_path}[/dim]")
         
         # Get directory entries
         if recursive:
@@ -74,33 +76,31 @@ async def ls_directory(
         # Sort entries
         entries = _sort_entries(entries, sort_by, reverse)
         
-        # Display results
-        if long_format:
-            _display_long_format(entries, dir_path, recursive)
-        else:
-            _display_short_format(entries, dir_path, recursive)
+        # Count files and directories
+        file_count = len([e for e in entries if e["is_file"]])
+        dir_count = len([e for e in entries if e["is_dir"]])
         
-        # Prepare summary
-        total_files = len([e for e in entries if e["is_file"]])
-        total_dirs = len([e for e in entries if e["is_dir"]])
+        # Display results - pass recursive flag
+        _display_minimal_format(entries, long_format, file_count, dir_count, recursive)
         
         return {
             "success": True,
             "path": str(dir_path),
             "entries": entries,
-            "total_files": total_files,
-            "total_directories": total_dirs,
-            "total_entries": len(entries),
-            "display_shown": True,
-            "long_format": long_format,
-            "recursive": recursive
+            "file_count": file_count,
+            "dir_count": dir_count,
+            "total_count": len(entries),
+            "total_entries": len(entries)  # For compatibility
         }
         
     except Exception as e:
         return {
             "success": False,
             "error": f"Error listing directory: {e}",
-            "entries": []
+            "entries": [],
+            "file_count": 0,
+            "dir_count": 0,
+            "total_count": 0
         }
 
 
@@ -153,10 +153,19 @@ async def _get_recursive_entries(
             if not show_hidden and item.name.startswith('.'):
                 continue
             
-            # Apply file type filter
-            if file_type_filter == "files" and not item.is_file():
+            # Apply file type filter at collection time for efficiency
+            is_dir = item.is_dir()
+            is_file = item.is_file()
+            
+            if file_type_filter == "files" and not is_file:
+                # Still need to recurse into directories to find files
+                if is_dir and current_depth < max_depth - 1:
+                    subentries = await _get_recursive_entries(
+                        item, show_hidden, max_depth, file_type_filter, current_depth + 1
+                    )
+                    entries.extend(subentries)
                 continue
-            elif file_type_filter == "dirs" and not item.is_dir():
+            elif file_type_filter == "dirs" and not is_dir:
                 continue
             
             entry = await _get_entry_info(item, dir_path.parent if current_depth > 0 else dir_path)
@@ -164,7 +173,7 @@ async def _get_recursive_entries(
             entries.append(entry)
             
             # Recurse into subdirectories
-            if item.is_dir() and current_depth < max_depth - 1:
+            if is_dir and current_depth < max_depth - 1:
                 subentries = await _get_recursive_entries(
                     item, show_hidden, max_depth, file_type_filter, current_depth + 1
                 )
@@ -178,7 +187,7 @@ async def _get_recursive_entries(
 
 
 async def _get_entry_info(item: Path, base_path: Path) -> Dict[str, Any]:
-    """Get detailed information about a file or directory."""
+    """Get basic information about a file or directory."""
     try:
         item_stat = item.stat()
         
@@ -196,11 +205,7 @@ async def _get_entry_info(item: Path, base_path: Path) -> Dict[str, Any]:
             "is_dir": item.is_dir(),
             "is_symlink": item.is_symlink(),
             "size": item_stat.st_size if item.is_file() else 0,
-            "size_human": _format_file_size(item_stat.st_size) if item.is_file() else "—",
             "modified": item_stat.st_mtime,
-            "modified_human": _format_modification_time(item_stat.st_mtime),
-            "permissions": _format_permissions(item_stat.st_mode),
-            "owner": _get_owner_info(item_stat),
         }
         
         # Add file extension for files
@@ -208,13 +213,6 @@ async def _get_entry_info(item: Path, base_path: Path) -> Dict[str, Any]:
             entry["extension"] = item.suffix.lower()
         else:
             entry["extension"] = ""
-        
-        # Add symlink target if applicable
-        if item.is_symlink():
-            try:
-                entry["symlink_target"] = str(item.readlink())
-            except Exception:
-                entry["symlink_target"] = "broken"
         
         return entry
         
@@ -228,11 +226,7 @@ async def _get_entry_info(item: Path, base_path: Path) -> Dict[str, Any]:
             "is_dir": False,
             "is_symlink": False,
             "size": 0,
-            "size_human": "unknown",
             "modified": 0,
-            "modified_human": "unknown",
-            "permissions": "unknown",
-            "owner": "unknown",
             "extension": "",
             "error": str(e)
         }
@@ -244,7 +238,7 @@ def _sort_entries(entries: List[Dict[str, Any]], sort_by: str, reverse: bool) ->
         "name": lambda e: e["name"].lower(),
         "size": lambda e: e["size"],
         "modified": lambda e: e["modified"],
-        "type": lambda e: (not e["is_dir"], e["name"].lower()),  # Directories first, then by name
+        "type": lambda e: (not e["is_dir"], e["name"].lower()),  # Directories first
     }
     
     sort_key = sort_key_map.get(sort_by, sort_key_map["name"])
@@ -252,295 +246,206 @@ def _sort_entries(entries: List[Dict[str, Any]], sort_by: str, reverse: bool) ->
     return sorted(entries, key=sort_key, reverse=reverse)
 
 
-def _display_short_format(entries: List[Dict[str, Any]], dir_path: Path, recursive: bool):
-    """Display directory entries in short format (grid layout)."""
+def _display_tree_format(entries: List[Dict[str, Any]], show_files: bool = True):
+    """Display directory entries in tree format like 'tree' command."""
     if not entries:
-        console.print("[dim]Directory is empty[/dim]")
+        console.print("[dim]empty[/dim]")
         return
     
-    # Group by type for better organization
-    directories = [e for e in entries if e["is_dir"]]
-    files = [e for e in entries if e["is_file"]]
-    symlinks = [e for e in entries if e["is_symlink"]]
-    
-    # Create table for better alignment
-    table = Table(
-        show_header=True,
-        header_style="bold cyan",
-        box=None,
-        pad_edge=False
-    )
-    table.add_column("Type", width=6)
-    table.add_column("Name", ratio=1)
-    table.add_column("Size", justify="right", width=10)
-    table.add_column("Modified", width=12)
-    
-    # Add directories first
-    for entry in directories:
-        name_display = entry["name"]
-        if recursive and "depth" in entry:
-            indent = "  " * entry["depth"]
-            name_display = f"{indent}{name_display}"
-        
-        table.add_row(
-            "📁 DIR",
-            f"[bold blue]{name_display}[/bold blue]",
-            "—",
-            entry["modified_human"]
-        )
-    
-    # Add files
-    for entry in files:
-        name_display = entry["name"]
-        if recursive and "depth" in entry:
-            indent = "  " * entry["depth"]
-            name_display = f"{indent}{name_display}"
-        
-        # Color by file type
-        file_color = _get_file_color(entry["extension"])
-        
-        table.add_row(
-            "📄 FILE",
-            f"[{file_color}]{name_display}[/{file_color}]",
-            entry["size_human"],
-            entry["modified_human"]
-        )
-    
-    # Add symlinks
-    for entry in symlinks:
-        name_display = entry["name"]
-        if recursive and "depth" in entry:
-            indent = "  " * entry["depth"]
-            name_display = f"{indent}{name_display}"
-        
-        target = entry.get("symlink_target", "unknown")
-        
-        table.add_row(
-            "🔗 LINK",
-            f"[cyan]{name_display}[/cyan] → [dim]{target}[/dim]",
-            "—",
-            entry["modified_human"]
-        )
-    
-    # Display in a panel
-    title = f"Contents of {dir_path.name or dir_path}"
-    if recursive:
-        title += " (recursive)"
-    
-    panel = Panel(table, title=title, border_style="blue", padding=(1, 2))
-    console.print(panel)
-    
-    # Show summary
-    summary_parts = []
-    if directories:
-        summary_parts.append(f"📁 {len(directories)} directories")
-    if files:
-        summary_parts.append(f"📄 {len(files)} files")
-    if symlinks:
-        summary_parts.append(f"🔗 {len(symlinks)} symlinks")
-    
-    if summary_parts:
-        console.print(f"\n[bold]Summary:[/bold] {', '.join(summary_parts)}")
-
-
-def _display_long_format(entries: List[Dict[str, Any]], dir_path: Path, recursive: bool):
-    """Display directory entries in long format (detailed list)."""
-    if not entries:
-        console.print("[dim]Directory is empty[/dim]")
-        return
-    
-    # Create detailed table
-    table = Table(
-        show_header=True,
-        header_style="bold cyan"
-    )
-    table.add_column("Permissions", width=12)
-    table.add_column("Owner", width=10)
-    table.add_column("Size", justify="right", width=10)
-    table.add_column("Modified", width=16)
-    table.add_column("Name", ratio=1)
+    # Build tree structure
+    tree = {}
+    root_entries = []
     
     for entry in entries:
-        name_display = entry["name"]
-        if recursive and "depth" in entry:
-            indent = "  " * entry["depth"]
-            name_display = f"{indent}{name_display}"
+        path_parts = entry["path"].split(os.sep)
         
-        # Style name by type
-        if entry["is_dir"]:
-            name_display = f"📁 [bold blue]{name_display}[/bold blue]"
-        elif entry["is_symlink"]:
-            target = entry.get("symlink_target", "unknown")
-            name_display = f"🔗 [cyan]{name_display}[/cyan] → [dim]{target}[/dim]"
+        if len(path_parts) == 1:
+            # Root level entry
+            root_entries.append(entry)
         else:
-            file_color = _get_file_color(entry["extension"])
-            name_display = f"📄 [{file_color}]{name_display}[/{file_color}]"
+            # Nested entry - build tree structure
+            current = tree
+            for i, part in enumerate(path_parts[:-1]):
+                if part not in current:
+                    current[part] = {"_children": {}, "_is_dir": True}
+                current = current[part]["_children"]
+            
+            # Add the final item
+            final_name = path_parts[-1]
+            current[final_name] = {
+                "_entry": entry,
+                "_children": {},
+                "_is_dir": entry["is_dir"]
+            }
+    
+    # Display root entries first
+    root_entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+    
+    for i, entry in enumerate(root_entries):
+        is_last = (i == len(root_entries) - 1)
+        _print_tree_entry(entry, "", is_last, show_files)
         
-        table.add_row(
-            entry["permissions"],
-            entry["owner"],
-            entry["size_human"],
-            entry["modified_human"],
-            name_display
-        )
+        # If it's a directory, show its contents from tree
+        if entry["is_dir"] and entry["name"] in tree:
+            _print_tree_recursive(tree[entry["name"]]["_children"], "", is_last, show_files)
     
-    # Display in a panel
-    title = f"Detailed listing of {dir_path.name or dir_path}"
-    if recursive:
-        title += " (recursive)"
-    
-    panel = Panel(table, title=title, border_style="blue", padding=(1, 2))
-    console.print(panel)
+    # Handle any remaining tree entries not in root
+    remaining_roots = set(tree.keys()) - set(e["name"] for e in root_entries)
+    for root_name in sorted(remaining_roots):
+        console.print(f"[blue]{root_name}/[/blue]")
+        _print_tree_recursive(tree[root_name]["_children"], "", True, show_files)
 
 
-def _format_file_size(size_bytes: int) -> str:
-    """Format file size in human-readable format."""
-    if size_bytes == 0:
-        return "0 B"
+def _print_tree_entry(entry: Dict[str, Any], prefix: str, is_last: bool, show_files: bool):
+    """Print a single tree entry with proper formatting."""
+    if not show_files and entry["is_file"]:
+        return
     
-    size_names = ["B", "KB", "MB", "GB", "TB"]
-    i = 0
-    size = float(size_bytes)
+    # Determine the connector
+    connector = "└── " if is_last else "├── "
     
-    while size >= 1024.0 and i < len(size_names) - 1:
-        size /= 1024.0
-        i += 1
-    
-    if i == 0:
-        return f"{int(size)} {size_names[i]}"
+    # Format the name
+    if entry["is_dir"]:
+        name = f"[blue]{entry['name']}[/blue]"
     else:
-        return f"{size:.1f} {size_names[i]}"
-
-
-def _format_modification_time(timestamp: float) -> str:
-    """Format modification time in human-readable format."""
-    try:
-        dt = datetime.fromtimestamp(timestamp)
-        now = datetime.now()
-        
-        # If within last 24 hours, show time
-        if (now - dt).days == 0:
-            return dt.strftime("%H:%M:%S")
-        # If within last week, show day and time
-        elif (now - dt).days < 7:
-            return dt.strftime("%a %H:%M")
-        # If within last year, show month/day time
-        elif (now - dt).days < 365:
-            return dt.strftime("%m/%d %H:%M")
-        # Otherwise show full date
-        else:
-            return dt.strftime("%m/%d/%Y")
-    except Exception:
-        return "unknown"
-
-
-def _format_permissions(mode: int) -> str:
-    """Format file permissions in human-readable format."""
-    try:
-        # Convert to rwx format
-        perms = stat.filemode(mode)
-        return perms
-    except Exception:
-        return "unknown"
-
-
-def _get_owner_info(item_stat) -> str:
-    """Get file owner information."""
-    try:
-        import pwd
-        owner = pwd.getpwuid(item_stat.st_uid).pw_name
-        return owner
-    except (ImportError, KeyError, OSError):
-        # Windows or owner not found
-        try:
-            return str(item_stat.st_uid)
-        except Exception:
-            return "unknown"
-
-
-def _get_file_color(extension: str) -> str:
-    """Get color for file based on extension."""
-    color_map = {
-        # Programming languages
-        ".py": "green",
-        ".js": "yellow",
-        ".ts": "blue",
-        ".jsx": "yellow",
-        ".tsx": "blue",
-        ".java": "red",
-        ".c": "blue",
-        ".cpp": "blue",
-        ".cs": "purple",
-        ".go": "cyan",
-        ".rs": "orange",
-        ".php": "purple",
-        ".rb": "red",
-        ".swift": "orange",
-        
-        # Web
-        ".html": "orange",
-        ".css": "blue",
-        ".scss": "pink",
-        ".less": "blue",
-        
-        # Data
-        ".json": "yellow",
-        ".xml": "orange",
-        ".yaml": "green",
-        ".yml": "green",
-        ".csv": "green",
-        ".sql": "blue",
-        
-        # Documentation
-        ".md": "blue",
-        ".rst": "blue",
-        ".txt": "white",
-        
-        # Images
-        ".png": "magenta",
-        ".jpg": "magenta",
-        ".jpeg": "magenta",
-        ".gif": "magenta",
-        ".svg": "cyan",
-        
-        # Archives
-        ".zip": "red",
-        ".tar": "red",
-        ".gz": "red",
-        ".rar": "red",
-        
-        # Config
-        ".conf": "cyan",
-        ".ini": "cyan",
-        ".toml": "cyan",
-        ".env": "yellow",
-    }
+        name = entry["name"]
+        # Add size for files
+        if entry.get("size", 0) > 0:
+            name += f" [dim]({_format_size(entry['size'])})[/dim]"
     
-    return color_map.get(extension.lower(), "white")
+    console.print(f"{prefix}{connector}{name}")
+
+
+def _print_tree_recursive(tree_dict: Dict, prefix: str, parent_is_last: bool, show_files: bool, depth: int = 0):
+    """Recursively print tree structure."""
+    if depth > 10:  # Prevent infinite recursion
+        return
+    
+    # Sort entries: directories first, then files
+    items = list(tree_dict.items())
+    items.sort(key=lambda x: (not x[1].get("_is_dir", False), x[0].lower()))
+    
+    for i, (name, node) in enumerate(items):
+        is_last = (i == len(items) - 1)
+        
+        # Skip files if not showing them
+        if not show_files and not node.get("_is_dir", False):
+            continue
+        
+        # Determine the new prefix
+        if parent_is_last:
+            new_prefix = prefix + "    "
+        else:
+            new_prefix = prefix + "│   "
+        
+        # Print the entry
+        connector = "└── " if is_last else "├── "
+        
+        if "_entry" in node:
+            entry = node["_entry"]
+            if entry["is_dir"]:
+                console.print(f"{prefix}{connector}[blue]{name}/[/blue]")
+            else:
+                size_str = f" [dim]({_format_size(entry['size'])})[/dim]" if entry.get("size", 0) > 0 else ""
+                console.print(f"{prefix}{connector}{name}{size_str}")
+        else:
+            # Directory without explicit entry
+            console.print(f"{prefix}{connector}[blue]{name}/[/blue]")
+        
+        # Recurse into subdirectories
+        if node.get("_children") and node.get("_is_dir", False):
+            _print_tree_recursive(node["_children"], new_prefix, is_last, show_files, depth + 1)
+
+
+def _display_minimal_format(entries: List[Dict[str, Any]], long_format: bool, file_count: int, dir_count: int, recursive: bool = False):
+    """Display directory entries in minimal format or tree format for recursive."""
+    if not entries:
+        console.print("[dim]empty[/dim]")
+        return
+    
+    # Display count summary
+    summary_parts = []
+    if dir_count > 0:
+        summary_parts.append(f"{dir_count} dirs")
+    if file_count > 0:
+        summary_parts.append(f"{file_count} files")
+    
+    if summary_parts:
+        console.print(f"[green]{', '.join(summary_parts)}[/green]")
+    
+    console.print()
+    
+    # Use tree format for recursive listings
+    if recursive:
+        _display_tree_format(entries, show_files=True)
+    else:
+        # Simple list display for non-recursive
+        display_count = 0
+        for entry in entries:
+            if display_count >= 50:  # Limit display
+                remaining = len(entries) - 50
+                console.print(f"  ... and {remaining} more")
+                break
+                
+            if entry["is_dir"]:
+                type_char = "D"
+                style = "blue"
+            elif entry["is_symlink"]:
+                type_char = "L"
+                style = "cyan"
+            else:
+                type_char = "F"
+                style = "white"
+            
+            name = entry["name"]
+            
+            # Add size for files in long format
+            if long_format and entry["is_file"]:
+                size_str = _format_size(entry["size"])
+                console.print(f"  [{type_char}] [{style}]{name}[/{style}] {size_str}")
+            else:
+                console.print(f"  [{type_char}] [{style}]{name}[/{style}]")
+            
+            display_count += 1
+
+
+def _format_size(size_bytes: int) -> str:
+    """Simple size formatting."""
+    if size_bytes < 1024:
+        return f"{size_bytes}B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f}KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f}MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"
 
 
 # Additional LS utilities
 
-async def ls_tree(path: str = ".", max_depth: int = 3) -> Dict[str, Any]:
+async def ls_tree(path: str = ".", max_depth: int = 3, show_hidden: bool = False) -> Dict[str, Any]:
     """
     Display directory tree structure.
     
     Args:
         path: Directory path to show tree for
         max_depth: Maximum depth to traverse
+        show_hidden: Whether to show hidden files
         
     Returns:
         Dictionary with tree structure
     """
+    console.print(f"[dim]Tree view of {path}[/dim]\n")
+    
     result = await ls_directory(
         path=path,
         recursive=True,
         max_depth=max_depth,
-        file_type_filter="dirs"  # Only show directories for tree
+        show_hidden=show_hidden
     )
     
-    if result["success"]:
-        console.print(f"\n[bold]Directory tree for {path}:[/bold]")
+    if result["success"] and result["entries"]:
+        # Custom tree display
         _display_tree_structure(result["entries"])
     
     return result
@@ -548,22 +453,21 @@ async def ls_tree(path: str = ".", max_depth: int = 3) -> Dict[str, Any]:
 
 def _display_tree_structure(entries: List[Dict[str, Any]]):
     """Display entries as a tree structure."""
-    # Group by depth and sort
-    by_depth = {}
+    # Group by depth
+    max_depth = max(e.get("depth", 0) for e in entries)
+    
     for entry in entries:
         depth = entry.get("depth", 0)
-        if depth not in by_depth:
-            by_depth[depth] = []
-        by_depth[depth].append(entry)
-    
-    # Display tree
-    for depth in sorted(by_depth.keys()):
-        for entry in by_depth[depth]:
-            indent = "│   " * depth
-            if depth > 0:
-                indent = indent[:-4] + "├── "
-            
-            console.print(f"{indent}📁 [bold blue]{entry['name']}[/bold blue]")
+        indent = "│   " * depth if depth > 0 else ""
+        
+        if depth > 0:
+            # Replace last part with tree connector
+            indent = indent[:-4] + "├── "
+        
+        if entry["is_dir"]:
+            console.print(f"{indent}[blue]{entry['name']}/[/blue]")
+        else:
+            console.print(f"{indent}{entry['name']}")
 
 
 async def ls_size_summary(path: str = ".", show_hidden: bool = False) -> Dict[str, Any]:
@@ -588,18 +492,18 @@ async def ls_size_summary(path: str = ".", show_hidden: bool = False) -> Dict[st
         total_size = sum(e["size"] for e in files)
         
         # Show size breakdown
-        console.print(f"\n[bold]Size summary for {path}:[/bold]")
-        console.print(f"Total files: {len(files)}")
-        console.print(f"Total size: {_format_file_size(total_size)}")
+        console.print(f"[dim]Size analysis of {path}[/dim]\n")
+        console.print(f"Files: {len(files)}")
+        console.print(f"Total: {_format_size(total_size)}")
         
         # Show largest files
         if files:
             largest = sorted(files, key=lambda x: x["size"], reverse=True)[:5]
-            console.print("\n[bold]Largest files:[/bold]")
+            console.print("\n[dim]Largest files:[/dim]")
             for file in largest:
-                console.print(f"  {file['size_human']:>8} {file['name']}")
+                console.print(f"  {_format_size(file['size']):>8}  {file['name']}")
         
         result["total_size"] = total_size
-        result["total_size_human"] = _format_file_size(total_size)
+        result["total_size_human"] = _format_size(total_size)
     
     return result

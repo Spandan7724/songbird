@@ -4,6 +4,8 @@ from typing import Dict, Type, List, Any, Optional
 import os
 import logging
 import ollama
+from rich.console import Console
+from .provider_validators import validate_and_fix_tool_arguments
 
 try:
     from google import genai
@@ -66,7 +68,7 @@ class BaseProvider(ABC):
         pass
     
     @abstractmethod
-    def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+    async def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """Send a conversation with multiple messages and return the response."""
         pass
 
@@ -74,7 +76,7 @@ class BaseProvider(ABC):
 class OllamaProvider(BaseProvider):
     """Ollama provider using official Ollama Python client."""
     
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "llama3.2"):
+    def __init__(self, base_url: str = "http://localhost:11434", model: str = "qwen2.5-coder:7b"):
         self.base_url = base_url
         self.model = model
         self.client = ollama.Client(host=base_url)
@@ -89,16 +91,13 @@ class OllamaProvider(BaseProvider):
             
             # Add tools if provided (Ollama supports function calling)
             if tools:
-                chat_args["tools"] = tools
+                # Convert Songbird tool format to Ollama format
+                ollama_tools = self._convert_tools_to_ollama_format(tools)
+                chat_args["tools"] = ollama_tools
             
             response = self.client.chat(**chat_args)
             
-            return ChatResponse(
-                content=response['message']['content'],
-                model=response.get('model'),
-                usage=response.get('usage'),
-                tool_calls=response['message'].get('tool_calls')
-            )
+            return self._convert_ollama_response_to_songbird(response)
             
         except ollama.ResponseError as e:
             if e.status_code == 404:
@@ -107,7 +106,7 @@ class OllamaProvider(BaseProvider):
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Ollama: {e}")
     
-    def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+    async def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """Send a conversation with multiple messages to Ollama."""
         try:
             chat_args = {
@@ -117,16 +116,13 @@ class OllamaProvider(BaseProvider):
             
             # Add tools if provided (Ollama supports function calling)
             if tools:
-                chat_args["tools"] = tools
+                # Convert Songbird tool format to Ollama format
+                ollama_tools = self._convert_tools_to_ollama_format(tools)
+                chat_args["tools"] = ollama_tools
             
             response = self.client.chat(**chat_args)
             
-            return ChatResponse(
-                content=response['message']['content'],
-                model=response.get('model'),
-                usage=response.get('usage'),
-                tool_calls=response['message'].get('tool_calls')
-            )
+            return self._convert_ollama_response_to_songbird(response)
             
         except ollama.ResponseError as e:
             if e.status_code == 404:
@@ -134,6 +130,59 @@ class OllamaProvider(BaseProvider):
             raise ConnectionError(f"Ollama error: {e.error}")
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Ollama: {e}")
+    
+    def _convert_tools_to_ollama_format(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert Songbird tool schemas to Ollama format."""
+        ollama_tools = []
+        
+        for tool in tools:
+            if tool["type"] == "function":
+                func_info = tool["function"]
+                # Ollama uses the same format as OpenAI for tools
+                ollama_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": func_info["name"],
+                        "description": func_info["description"],
+                        "parameters": func_info.get("parameters", {})
+                    }
+                })
+        
+        return ollama_tools
+    
+    def _convert_ollama_response_to_songbird(self, response) -> ChatResponse:
+        """Convert Ollama response to Songbird ChatResponse format."""
+        message = response.get('message', {})
+        content = message.get('content', '') or ''
+        
+        # Convert tool calls if present
+        tool_calls = None
+        ollama_tool_calls = message.get('tool_calls')
+        
+        if ollama_tool_calls:
+            tool_calls = []
+            for tool_call in ollama_tool_calls:
+                # Validate and fix arguments
+                fixed_args = validate_and_fix_tool_arguments(tool_call.get('function', {}).get('arguments', {}), "ollama")
+                tool_calls.append({
+                    "id": tool_call.get('id', ''),
+                    "function": {
+                        "name": tool_call.get('function', {}).get('name', ''),
+                        "arguments": fixed_args
+                    }
+                })
+        
+        # Convert usage information
+        usage_dict = None
+        if response.get('usage'):
+            usage_dict = response['usage']
+        
+        return ChatResponse(
+            content=content,
+            model=response.get('model'),
+            usage=usage_dict,
+            tool_calls=tool_calls
+        )
 
 
 class OpenAIProvider(BaseProvider):
@@ -179,11 +228,13 @@ class OpenAIProvider(BaseProvider):
         if message.tool_calls:
             tool_calls = []
             for tool_call in message.tool_calls:
+                # Validate and fix arguments
+                fixed_args = validate_and_fix_tool_arguments(tool_call.function.arguments, "openai")
                 tool_calls.append({
                     "id": tool_call.id,
                     "function": {
                         "name": tool_call.function.name,
-                        "arguments": tool_call.function.arguments
+                        "arguments": fixed_args  # Use fixed arguments
                     }
                 })
         
@@ -230,7 +281,7 @@ class OpenAIProvider(BaseProvider):
         except Exception as e:
             raise ConnectionError(f"Failed to connect to OpenAI: {e}")
     
-    def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+    async def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """Send a conversation with multiple messages to OpenAI."""
         try:
             chat_kwargs = {
@@ -302,11 +353,13 @@ class ClaudeProvider(BaseProvider):
                     if block.type == "text":
                         content += block.text
                     elif block.type == "tool_use":
+                        # Validate and fix arguments
+                        fixed_args = validate_and_fix_tool_arguments(block.input, "claude")
                         tool_calls.append({
                             "id": block.id,
                             "function": {
                                 "name": block.name,
-                                "arguments": block.input
+                                "arguments": fixed_args  # Use fixed arguments
                             }
                         })
             
@@ -356,7 +409,7 @@ class ClaudeProvider(BaseProvider):
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Claude: {e}")
     
-    def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+    async def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """Send a conversation with multiple messages to Claude."""
         try:
             # Filter out system messages and combine them into a system parameter
@@ -429,40 +482,69 @@ class OpenRouterProvider(BaseProvider):
         return openai_tools
     
     def _convert_openrouter_response_to_songbird(self, response) -> ChatResponse:
-        """Convert OpenRouter response to Songbird ChatResponse format."""
-        choice = response.choices[0]
-        message = choice.message
-        
-        content = message.content or ""
-        
-        # Convert tool calls if present
-        tool_calls = None
-        if message.tool_calls:
-            tool_calls = []
-            for tool_call in message.tool_calls:
-                tool_calls.append({
-                    "id": tool_call.id,
-                    "function": {
-                        "name": tool_call.function.name,
-                        "arguments": tool_call.function.arguments
+        """Convert OpenRouter response to Songbird ChatResponse format with robust error handling."""
+        try:
+            # Robust checking for response structure
+            if not hasattr(response, 'choices') or not response.choices:
+                raise ValueError("OpenRouter response missing choices")
+            
+            choice = response.choices[0]
+            if not hasattr(choice, 'message'):
+                raise ValueError("OpenRouter response choice missing message")
+                
+            message = choice.message
+            content = getattr(message, 'content', '') or ''
+            
+            # Convert tool calls if present
+            tool_calls = None
+            if hasattr(message, 'tool_calls') and message.tool_calls:
+                tool_calls = []
+                for tool_call in message.tool_calls:
+                    try:
+                        # Validate and fix arguments with better error handling
+                        if hasattr(tool_call, 'function') and hasattr(tool_call.function, 'arguments'):
+                            fixed_args = validate_and_fix_tool_arguments(tool_call.function.arguments, "openrouter")
+                            tool_calls.append({
+                                "id": getattr(tool_call, 'id', ''),
+                                "function": {
+                                    "name": getattr(tool_call.function, 'name', ''),
+                                    "arguments": fixed_args
+                                }
+                            })
+                    except Exception as e:
+                        Console().print(f"[yellow]Warning: Skipping malformed tool call in OpenRouter response: {e}[/yellow]")
+                        continue
+            
+            # Convert usage information with error handling
+            usage_dict = None
+            if hasattr(response, 'usage') and response.usage:
+                try:
+                    usage_dict = {
+                        "prompt_tokens": getattr(response.usage, 'prompt_tokens', 0),
+                        "completion_tokens": getattr(response.usage, 'completion_tokens', 0),
+                        "total_tokens": getattr(response.usage, 'total_tokens', 0)
                     }
-                })
-        
-        # Convert usage information
-        usage_dict = None
-        if response.usage:
-            usage_dict = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens
-            }
-        
-        return ChatResponse(
-            content=content,
-            model=response.model,
-            usage=usage_dict,
-            tool_calls=tool_calls
-        )
+                except Exception:
+                    # If usage parsing fails, just continue without usage info
+                    usage_dict = None
+            
+            return ChatResponse(
+                content=content,
+                model=getattr(response, 'model', self.model),
+                usage=usage_dict,
+                tool_calls=tool_calls
+            )
+            
+        except Exception as e:
+            # If response parsing completely fails, return a minimal response
+            error_content = f"Error parsing OpenRouter response: {e}"
+            Console().print(f"[red]{error_content}[/red]")
+            return ChatResponse(
+                content=error_content,
+                model=self.model,
+                usage=None,
+                tool_calls=None
+            )
     
     def chat(self, message: str, tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """Send a chat message to OpenRouter."""
@@ -491,7 +573,7 @@ class OpenRouterProvider(BaseProvider):
         except Exception as e:
             raise ConnectionError(f"Failed to connect to OpenRouter: {e}")
     
-    def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+    async def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """Send a conversation with multiple messages to OpenRouter."""
         try:
             chat_kwargs = {
@@ -611,11 +693,13 @@ class GeminiProvider(BaseProvider):
         if hasattr(response, 'function_calls') and response.function_calls:
             tool_calls = []
             for func_call in response.function_calls:
+                # Validate and fix arguments
+                fixed_args = validate_and_fix_tool_arguments(func_call.args, "gemini")
                 tool_calls.append({
                     "id": getattr(func_call, 'id', ""),
                     "function": {
                         "name": func_call.name,
-                        "arguments": func_call.args
+                        "arguments": fixed_args  # Use fixed arguments
                     }
                 })
         else:
@@ -626,11 +710,13 @@ class GeminiProvider(BaseProvider):
                     tool_calls = []
                     for part in candidate.content.parts:
                         if hasattr(part, 'function_call') and part.function_call:
+                            # Validate and fix arguments
+                            fixed_args = validate_and_fix_tool_arguments(part.function_call.args, "gemini")
                             tool_calls.append({
                                 "id": getattr(part.function_call, 'id', ""),
                                 "function": {
                                     "name": part.function_call.name,
-                                    "arguments": part.function_call.args
+                                    "arguments": fixed_args  # Use fixed arguments
                                 }
                             })
                     
@@ -669,7 +755,7 @@ class GeminiProvider(BaseProvider):
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Gemini: {e}")
     
-    def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
+    async def chat_with_messages(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
             """Send a conversation with multiple messages to Gemini."""
             try:
                 # Convert messages to Gemini format
@@ -757,8 +843,28 @@ def get_provider(name: str) -> Type[BaseProvider]:
 
 
 def list_available_providers() -> List[str]:
-    """Get list of available provider names."""
+    """Get list of available provider names (with libraries installed)."""
     return list(_providers.keys())
+
+
+def list_ready_providers() -> List[str]:
+    """Get list of providers that are ready to use (with API keys configured)."""
+    ready_providers = []
+    
+    # Check each provider for API key availability
+    if GEMINI_AVAILABLE and os.getenv("GOOGLE_API_KEY"):
+        ready_providers.append("gemini")
+    if ANTHROPIC_AVAILABLE and os.getenv("ANTHROPIC_API_KEY"):
+        ready_providers.append("claude")
+    if OPENAI_AVAILABLE and os.getenv("OPENAI_API_KEY"):
+        ready_providers.append("openai")
+    if OPENAI_AVAILABLE and os.getenv("OPENROUTER_API_KEY"):
+        ready_providers.append("openrouter")
+    
+    # Ollama is always available if installed (no API key needed)
+    ready_providers.append("ollama")
+    
+    return ready_providers
 
 
 def get_default_provider() -> str:

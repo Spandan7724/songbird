@@ -32,6 +32,11 @@ Thumbs.db
 CLAUDE.md
 DISTRIBUTION.md
 TODO.md
+PHASE_5_COMPLETION.md
+SONGBIRD_REPAIR_PLAN.md
+COMPLETION_SUMMARY.md
+CHANGELOG.md
+GEMINI.md
 songbird.egg-info/
 songbird/__pycache__/
 tests/__pycache__

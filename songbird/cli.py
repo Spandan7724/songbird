@@ -16,13 +16,17 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.markdown import Markdown
 from . import __version__
-from .llm.providers import get_provider, get_default_provider
-from .conversation import ConversationOrchestrator
-from .memory.manager import SessionManager
+from .llm.providers import get_provider, get_default_provider, list_available_providers, get_provider_info
+from .orchestrator import SongbirdOrchestrator
+from .memory.optimized_manager import OptimizedSessionManager
 from .memory.models import Session
 from .commands import CommandInputHandler, get_command_registry
 from .memory.history_manager import MessageHistoryManager
 from .commands.loader import is_command_input, parse_command_input, load_all_commands
+from .enhanced_interface import (
+    enhanced_cli, display_enhanced_help, display_version_info,
+    create_provider_status_table, create_banner
+)
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich",
                   help="Songbird - Terminal-first AI coding companion", no_args_is_help=False)
@@ -167,7 +171,40 @@ def format_time_ago(dt: datetime) -> str:
         return "just now"
 
 
-def display_session_selector(sessions: list[Session]) -> Optional[Session]:
+def _get_session_display_info(session_manager, session_id: str) -> tuple[int, str]:
+    """Get user message count and last user message for session display."""
+    try:
+        # Try to get from session manager's storage directory
+        storage_dir = session_manager.storage_dir
+        session_file = storage_dir / f"{session_id}.jsonl"
+        
+        if not session_file.exists():
+            return 0, ""
+        
+        user_messages = []
+        
+        with open(session_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                
+                try:
+                    data = json.loads(line)
+                    if data.get("type") == "message" and data.get("role") == "user":
+                        user_messages.append(data.get("content", ""))
+                except json.JSONDecodeError:
+                    continue
+        
+        user_count = len(user_messages)
+        last_user_msg = user_messages[-1] if user_messages else ""
+        
+        return user_count, last_user_msg
+        
+    except Exception:
+        return 0, ""
+
+
+def display_session_selector(sessions: list[Session], session_manager) -> Optional[Session]:
     """Display an interactive session selector with better terminal handling."""
     if not sessions:
         console.print("No previous sessions found.", style="yellow")
@@ -185,12 +222,19 @@ def display_session_selector(sessions: list[Session]) -> Optional[Session]:
     for session in display_sessions:
         created = format_time_ago(session.created_at)
         modified = format_time_ago(session.updated_at)
-        msg_count = len(session.messages)
-        summary = (session.summary or "Empty session")[:50]
-        if len(session.summary or "") > 50:
-            summary += "..."
         
-        option = f"{modified} | {created} | {msg_count} msgs | {summary}"
+        # Get actual message count and last user message from session file
+        user_msg_count, last_user_msg = _get_session_display_info(session_manager, session.id)
+        
+        # Use last user message as summary, truncated
+        if last_user_msg:
+            summary = last_user_msg[:40]
+            if len(last_user_msg) > 40:
+                summary += "..."
+        else:
+            summary = "Empty session"
+        
+        option = f"{modified} | {created} | {user_msg_count} msgs | {summary}"
         options.append(option)
     
     options.append("Start new session")
@@ -458,8 +502,8 @@ def chat(
     """Start an interactive Songbird session with AI and tools."""
     show_banner()
 
-    # Initialize session manager
-    session_manager = SessionManager(os.getcwd())
+    # Initialize optimized session manager
+    session_manager = OptimizedSessionManager(working_directory=os.getcwd())
     session = None
 
     # Variables to track provider config
@@ -496,7 +540,7 @@ def chat(
     elif resume_session:
         sessions = session_manager.list_sessions()
         if sessions:
-            selected_session = display_session_selector(sessions)
+            selected_session = display_session_selector(sessions, session_manager)
             if selected_session:
                 session = session_manager.load_session(selected_session.id)
                 if session:
@@ -536,7 +580,6 @@ def chat(
         "I can search files, manage todos, run shell commands, and perform multi-file operations with full task management.", style="dim")
     console.print(
         "Type [spring_green1]'/'[/spring_green1] for commands, or [spring_green1]'exit'[/spring_green1] to quit.\n", style="dim")
-
 
     
     # Create history manager (will be passed to input handler after orchestrator is created)
@@ -583,9 +626,13 @@ def chat(
             # For all other providers (openai, claude, gemini, openrouter), just pass the model
             provider_instance = provider_class(model=model_name)
 
-        # Create orchestrator with session
-        orchestrator = ConversationOrchestrator(
-            provider_instance, os.getcwd(), session=session)
+        # Create UI layer
+        from .ui.ui_layer import UILayer
+        ui_layer = UILayer(console=console)
+        
+        # Create orchestrator with session and UI
+        orchestrator = SongbirdOrchestrator(
+            provider_instance, os.getcwd(), session=session, ui_layer=ui_layer)
 
         # Start chat loop
         asyncio.run(_chat_loop(orchestrator, command_registry, command_input_handler,
@@ -624,13 +671,13 @@ def chat(
 
 # Updated _chat_loop function for cli.py
 
-async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
+async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
                      command_input_handler, provider_name: str, provider_instance):
     """Run the interactive chat loop with improved status handling."""
     
     while True:
         try:
-            # Get user input
+            # Get user input using command input handler (keeps prompt-toolkit history)
             user_input = await command_input_handler.get_input_with_commands("You")
             
             if user_input.lower() in ["exit", "quit", "bye"]:
@@ -733,7 +780,14 @@ async def _chat_loop(orchestrator: ConversationOrchestrator, command_registry,
             console.print("\nGoodbye!", style="bold blue")
             break
         except Exception as e:
-            console.print(f"\nError: {e}", style="red")
+            # Use enhanced error display
+            suggestions = [
+                "Check your internet connection if using cloud providers",
+                "Verify API keys are correctly set in environment variables", 
+                "Try switching to a different provider with /model command",
+                "Report persistent issues at https://github.com/Spandan7724/songbird/issues"
+            ]
+            enhanced_cli.display_error_with_suggestions(e, suggestions)
 
 
 
@@ -744,6 +798,80 @@ def version() -> None:
     show_banner()
     console.print(f"\nSongbird v{__version__}", style="bold cyan")
     console.print("Terminal-first AI coding companion", style="dim")
+
+
+@app.command()
+def help() -> None:
+    """Show comprehensive help information."""
+    display_enhanced_help(console)
+
+
+@app.command()
+def status() -> None:
+    """Show system status and provider information."""
+    enhanced_cli.display_startup_banner()
+
+
+@app.command()
+def performance(
+    enable: bool = typer.Option(False, "--enable", help="Enable performance monitoring"),
+    report: bool = typer.Option(False, "--report", help="Show performance report"),
+    clear: bool = typer.Option(False, "--clear", help="Clear performance data")
+) -> None:
+    """Performance monitoring and optimization commands."""
+    from .performance import enable_profiling, disable_profiling, get_profiler, clear_profiling, OptimizationSuggestions
+    
+    if enable:
+        enable_profiling()
+        enhanced_cli.display_success_message("Performance monitoring enabled")
+        return
+    
+    if clear:
+        clear_profiling()
+        enhanced_cli.display_success_message("Performance data cleared")
+        return
+    
+    if report:
+        profiler = get_profiler()
+        report = profiler.generate_report()
+        
+        if report.operations_count == 0:
+            console.print("[yellow]No performance data available. Enable monitoring with --enable first.[/yellow]")
+            return
+        
+        # Display performance report
+        console.print("\n[bold]Performance Report:[/bold]")
+        console.print(f"Operations: {report.operations_count}")
+        console.print(f"Total time: {report.total_duration:.2f}s")
+        console.print(f"Average time: {report.avg_duration:.3f}s")
+        console.print(f"Memory peak: {report.memory_peak:.1f}MB")
+        
+        # Show slowest operations
+        slowest = report.get_slowest_operations(3)
+        if slowest:
+            console.print("\n[bold]Slowest Operations:[/bold]")
+            for i, op in enumerate(slowest, 1):
+                console.print(f"{i}. {op.operation}: {op.duration:.3f}s")
+        
+        # Show optimization suggestions
+        suggestions = OptimizationSuggestions.analyze_report(report)
+        if suggestions:
+            console.print("\n[bold]Optimization Suggestions:[/bold]")
+            for suggestion in suggestions[:5]:
+                console.print(f"💡 {suggestion}")
+        
+        return
+    
+    # Default: show performance status
+    profiler = get_profiler()
+    if profiler.enabled:
+        console.print("[green]✅ Performance monitoring is enabled[/green]")
+        report = profiler.generate_report()
+        if report.operations_count > 0:
+            console.print(f"Current session: {report.operations_count} operations, {report.total_duration:.2f}s total")
+    else:
+        console.print("[yellow]Performance monitoring is disabled[/yellow]")
+        console.print("Use 'songbird performance --enable' to start monitoring")
 
 
 if __name__ == "__main__":
