@@ -38,28 +38,41 @@ def create_banner() -> Panel:
 
 
 def create_provider_status_table() -> Table:
-    """Create a table showing provider availability."""
+    """Create a table showing provider availability with discovery status."""
     table = Table(title="[bold]Provider Status[/bold]", show_header=True, header_style="bold magenta")
     table.add_column("Provider", style="cyan", no_wrap=True)
     table.add_column("Status", justify="center")
     table.add_column("Models Available", style="dim")
+    table.add_column("Discovery", justify="center", style="dim")
     
-    # Get provider information
+    # Get provider information with discovery
     from .llm.providers import get_provider_info
-    provider_info = get_provider_info()
+    provider_info = get_provider_info(use_discovery=True)
     
     for name, info in provider_info.items():
-        # Status emoji and text
-        if info["available"]:
-            status = "[green]✅ Available[/green]"
-            models = ", ".join(info["models"][:2]) if info["models"] else "Unknown"
+        # Status and readiness
+        if info["ready"]:
+            status = "[green]✓ Ready[/green]"
+        elif info["available"]:
+            status = "[yellow]⚠ Setup Required[/yellow]"
+        else:
+            status = "[red]✗ Unavailable[/red]"
+        
+        # Models information
+        if info["models"]:
+            models = ", ".join(info["models"][:2])
             if len(info["models"]) > 2:
                 models += f" (+{len(info['models']) - 2} more)"
         else:
-            status = "[red]❌ Unavailable[/red]"
-            models = "[dim]Requires configuration[/dim]"
+            models = "[dim]None found[/dim]"
         
-        table.add_row(name.title(), status, models)
+        # Discovery status
+        if info.get("models_discovered", False):
+            discovery_status = "[green]✓ Live[/green]"
+        else:
+            discovery_status = "[dim]Fallback[/dim]"
+        
+        table.add_row(name.title(), status, models, discovery_status)
     
     return table
 
@@ -269,7 +282,7 @@ class EnhancedCLI:
     
     def display_success_message(self, message: str, details: Optional[str] = None):
         """Display success messages with optional details."""
-        success_text = f"[bold green]✅ {message}[/bold green]"
+        success_text = f"[bold green]{message}[/bold green]"
         if details:
             success_text += f"\n{details}"
         

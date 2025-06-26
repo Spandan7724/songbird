@@ -16,7 +16,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.markdown import Markdown
 from . import __version__
-from .llm.providers import get_provider, get_default_provider, list_available_providers, get_provider_info
+from .llm.providers import get_provider, get_default_provider, get_default_provider_name, list_available_providers, get_provider_info
 from .orchestrator import SongbirdOrchestrator
 from .memory.optimized_manager import OptimizedSessionManager
 from .memory.models import Session
@@ -228,13 +228,24 @@ def display_session_selector(sessions: list[Session], session_manager) -> Option
         
         # Use last user message as summary, truncated
         if last_user_msg:
-            summary = last_user_msg[:40]
-            if len(last_user_msg) > 40:
+            summary = last_user_msg[:35]  # Slightly shorter to make room for provider info
+            if len(last_user_msg) > 35:
                 summary += "..."
         else:
             summary = "Empty session"
         
-        option = f"{modified} | {created} | {user_msg_count} msgs | {summary}"
+        # Add provider type information
+        provider_info = ""
+        if session.provider_config:
+            provider = session.provider_config.get("provider", "unknown")
+            if session.is_litellm_session():
+                provider_info = f"[LiteLLM:{provider}]"
+            else:
+                provider_info = f"[{provider}]"
+        else:
+            provider_info = "[legacy]"
+        
+        option = f"{modified} | {created} | {user_msg_count} msgs | {provider_info} | {summary}"
         options.append(option)
     
     options.append("Start new session")
@@ -444,7 +455,11 @@ def main(
     continue_session: bool = typer.Option(
         False, "--continue", "-c", help="Continue the latest session"),
     resume_session: bool = typer.Option(
-        False, "--resume", "-r", help="Resume a previous session from a list")
+        False, "--resume", "-r", help="Resume a previous session from a list"),
+    use_litellm: bool = typer.Option(
+        False, "--litellm", help="Use LiteLLM unified interface (default when legacy unavailable)"),
+    provider_url: Optional[str] = typer.Option(
+        None, "--provider-url", help="Custom API base URL for provider", hidden=True)
 ):
     """
     Songbird - Terminal-first AI coding companion
@@ -452,13 +467,14 @@ def main(
     Run 'songbird' to start an interactive chat session with AI and tools.
     Run 'songbird --continue' to continue your latest session.
     Run 'songbird --resume' to select and resume a previous session.
+    Run 'songbird --litellm' to use the new LiteLLM unified interface.
     Run 'songbird version' to show version information.
     """
     if list_providers:
         from .llm.providers import get_provider_info
         
         provider_info = get_provider_info()
-        default = get_default_provider()
+        default = get_default_provider_name()
         
         console.print("Available LLM Providers:", style="bold cornflower_blue")
         console.print()
@@ -471,7 +487,10 @@ def main(
                 status_text = " [red](unavailable)[/red]"
             
             console.print(f"[bold]{provider_name}[/bold]{status_text}")
-            console.print(f"  Description: {info['description']}")
+            
+            # Show discovery status
+            discovery_status = "✓ Live Discovery" if info.get("models_discovered", False) else "Fallback Models"
+            console.print(f"  Models: [dim]{discovery_status}[/dim]")
             
             if info["api_key_env"]:
                 key_status = "✓" if info["available"] else "✗"
@@ -490,14 +509,17 @@ def main(
     if ctx.invoked_subcommand is None:
         # No subcommand provided, start chat session
         chat(provider=provider,
-             continue_session=continue_session, resume_session=resume_session)
+             continue_session=continue_session, resume_session=resume_session,
+             use_litellm=use_litellm, provider_url=provider_url)
 
 
 @app.command(hidden=True)
 def chat(
     provider: Optional[str] = None,
     continue_session: bool = False,
-    resume_session: bool = False
+    resume_session: bool = False,
+    use_litellm: bool = False,
+    provider_url: Optional[str] = None
 ) -> None:
     """Start an interactive Songbird session with AI and tools."""
     show_banner()
@@ -526,7 +548,11 @@ def chat(
             if session.provider_config:
                 restored_provider = session.provider_config.get("provider")
                 restored_model = session.provider_config.get("model")
-                if restored_provider and restored_model:
+                # Check if session was using LiteLLM
+                if session.is_litellm_session():
+                    use_litellm = True
+                    console.print(f"[dim]Restored LiteLLM session: {restored_provider} - {restored_model}[/dim]")
+                elif restored_provider and restored_model:
                     console.print(
                         f"[dim]Restored: {restored_provider} - {restored_model}[/dim]")
 
@@ -553,7 +579,11 @@ def chat(
                         restored_provider = session.provider_config.get(
                             "provider")
                         restored_model = session.provider_config.get("model")
-                        if restored_provider and restored_model:
+                        # Check if session was using LiteLLM
+                        if session.is_litellm_session():
+                            use_litellm = True
+                            console.print(f"[dim]Restored LiteLLM session: {restored_provider} - {restored_model}[/dim]")
+                        elif restored_provider and restored_model:
                             console.print(
                                 f"[dim]Restored: {restored_provider} - {restored_model}[/dim]")
 
@@ -591,7 +621,7 @@ def chat(
 
     # Determine provider and model
     # Use restored values if available, otherwise use defaults
-    provider_name = restored_provider or provider or get_default_provider()
+    provider_name = restored_provider or provider or get_default_provider_name()
 
     # Set default models based on provider
     default_models = {
@@ -609,22 +639,52 @@ def chat(
         session.update_provider_config(provider_name, model_name)
         session_manager.save_session(session)
 
-    console.print(
-        f"Using provider: {provider_name}, model: {model_name}", style="dim")
+    # Show LiteLLM usage status
+    if use_litellm:
+        console.print(
+            f"Using LiteLLM provider: {provider_name}, model: {model_name}", style="cornflower_blue")
+    else:
+        console.print(
+            f"Using provider: {provider_name}, model: {model_name}", style="dim")
 
     # Initialize LLM provider and conversation orchestrator
     try:
-        provider_class = get_provider(provider_name)
-
-        # Initialize provider based on type
-        if provider_name == "ollama":
-            provider_instance = provider_class(
-                base_url="http://127.0.0.1:11434",
-                model=model_name
+        if use_litellm:
+            # Use LiteLLM unified provider
+            from .llm.providers import get_litellm_provider
+            console.print(f"[cornflower_blue]Using LiteLLM unified interface for {provider_name}[/cornflower_blue]")
+            
+            provider_instance = get_litellm_provider(
+                provider_name=provider_name,
+                model=model_name,
+                api_base=provider_url,
+                # Add session metadata tracking
+                session_metadata=session.provider_config if session else None
             )
+            
+            # Update session with LiteLLM configuration if we have a session
+            if session:
+                session.update_litellm_config(
+                    provider=provider_name,
+                    model=model_name,
+                    litellm_model=provider_instance.model,
+                    api_base=provider_url
+                )
+                session_manager.save_session(session)
         else:
-            # For all other providers (openai, claude, gemini, openrouter), just pass the model
-            provider_instance = provider_class(model=model_name)
+            # Since legacy providers have been removed, get_provider now returns LiteLLM providers
+            console.print(f"[cornflower_blue]Using LiteLLM unified interface for {provider_name}[/cornflower_blue]")
+            provider_instance = get_provider(provider_name)
+            
+            # Update session with LiteLLM configuration if we have a session
+            if session:
+                session.update_litellm_config(
+                    provider=provider_name,
+                    model=model_name,
+                    litellm_model=provider_instance.model,
+                    api_base=provider_url
+                )
+                session_manager.save_session(session)
 
         # Create UI layer
         from .ui.ui_layer import UILayer
@@ -641,32 +701,54 @@ def chat(
     except Exception as e:
         console.print(f"Error starting Songbird: {e}", style="red")
         
-        # Provide helpful troubleshooting information based on provider
+        # Provide helpful troubleshooting information based on provider and mode
+        provider_mode = "LiteLLM" if use_litellm else "Legacy"
+        console.print(f"[dim]Provider mode: {provider_mode}[/dim]")
+        
+        if use_litellm:
+            # LiteLLM-specific guidance
+            console.print("\n[bold yellow]LiteLLM Troubleshooting:[/bold yellow]")
+            console.print("• Check the LiteLLM adapter initialization above for specific error details", style="dim")
+            console.print("• Verify your model string follows LiteLLM format: 'provider/model'", style="dim")
+            console.print("• Try running without --litellm flag to use legacy provider as fallback", style="dim")
+            
+            if provider_url:
+                console.print(f"• Custom API base URL in use: {provider_url}", style="dim")
+                console.print("• Verify the custom API endpoint is accessible and correct", style="dim")
+            
+        # Common provider guidance (works for both LiteLLM and legacy)
         if provider_name == "openai":
             console.print(
-                "Make sure you have set OPENAI_API_KEY environment variable", style="dim")
+                "\n[bold]OpenAI Setup:[/bold] Set OPENAI_API_KEY environment variable", style="dim")
             console.print(
                 "Get your API key from: https://platform.openai.com/api-keys", style="dim")
         elif provider_name == "claude":
             console.print(
-                "Make sure you have set ANTHROPIC_API_KEY environment variable", style="dim")
+                "\n[bold]Claude Setup:[/bold] Set ANTHROPIC_API_KEY environment variable", style="dim")
             console.print(
                 "Get your API key from: https://console.anthropic.com/account/keys", style="dim")
         elif provider_name == "gemini":
             console.print(
-                "Make sure you have set GOOGLE_API_KEY environment variable", style="dim")
+                "\n[bold]Gemini Setup:[/bold] Set GOOGLE_API_KEY environment variable", style="dim")
             console.print(
                 "Get your API key from: https://aistudio.google.com/app/apikey", style="dim")
         elif provider_name == "openrouter":
             console.print(
-                "Make sure you have set OPENROUTER_API_KEY environment variable", style="dim")
+                "\n[bold]OpenRouter Setup:[/bold] Set OPENROUTER_API_KEY environment variable", style="dim")
             console.print(
                 "Get your API key from: https://openrouter.ai/keys", style="dim")
         elif provider_name == "ollama":
             console.print(
-                "Make sure Ollama is running: ollama serve", style="dim")
+                "\n[bold]Ollama Setup:[/bold] Make sure Ollama is running: ollama serve", style="dim")
             console.print(
                 f"And the model is available: ollama pull {model_name}", style="dim")
+        
+        # Additional LiteLLM guidance
+        if use_litellm:
+            console.print("\n[bold]LiteLLM Resources:[/bold]", style="dim")
+            console.print("• LiteLLM Documentation: https://docs.litellm.ai/", style="dim")
+            console.print("• Supported Providers: https://docs.litellm.ai/docs/providers", style="dim")
+            console.print("• Model Formats: https://docs.litellm.ai/docs/completion/supported", style="dim")
 
 
 # Updated _chat_loop function for cli.py
@@ -726,17 +808,42 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
                             # Model was changed, update display and save to session
                             new_model = result.data["new_model"]
 
-                            # Update session with new provider config
+                            # Determine if we're using LiteLLM
+                            is_litellm_provider = hasattr(provider_instance, 'vendor_prefix') and hasattr(provider_instance, 'model_name')
+                            
+                            # Update session with appropriate provider config
                             if orchestrator.session:
-                                orchestrator.session.update_provider_config(
-                                    provider_name, new_model)
+                                if is_litellm_provider:
+                                    # For LiteLLM, update with LiteLLM-specific config
+                                    orchestrator.session.update_litellm_config(
+                                        provider=provider_name,
+                                        model=new_model,
+                                        litellm_model=provider_instance.model,  # The resolved LiteLLM model string
+                                        api_base=getattr(provider_instance, 'api_base', None)
+                                    )
+                                    console.print(f"[dim]🔄 LiteLLM model changed: {provider_name} - {new_model} -> {provider_instance.model}[/dim]")
+                                else:
+                                    # For legacy providers, use legacy config
+                                    orchestrator.session.update_provider_config(
+                                        provider_name, new_model, provider_type="legacy")
+                                    console.print(f"[dim]🔄 Legacy model changed: {provider_name} - {new_model}[/dim]")
+                                
                                 # Always save session when model changes
-                                orchestrator.session_manager.save_session(
-                                    orchestrator.session)
+                                orchestrator.session_manager.save_session(orchestrator.session)
+                                
+                                # Add synthetic context message to conversation for model change
+                                from .memory.models import Message
+                                context_msg = Message(
+                                    role="system",
+                                    content=f"🔄 Model switched to {new_model} via /model command"
+                                )
+                                orchestrator.session.add_message(context_msg)
 
                             # Show the model change
-                            console.print(
-                                f"[dim]Now using: {provider_name} - {new_model}[/dim]")
+                            model_display = f"{provider_name} - {new_model}"
+                            if is_litellm_provider:
+                                model_display += f" (LiteLLM: {provider_instance.model})"
+                            console.print(f"[dim]Now using: {model_display}[/dim]")
 
                     continue
                 else:
@@ -788,6 +895,14 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
                 "Report persistent issues at https://github.com/Spandan7724/songbird/issues"
             ]
             enhanced_cli.display_error_with_suggestions(e, suggestions)
+    
+    # Clean up resources when exiting chat loop
+    try:
+        if hasattr(provider_instance, 'cleanup'):
+            await provider_instance.cleanup()
+    except Exception as cleanup_error:
+        # Don't let cleanup errors affect normal exit
+        pass  # Silently ignore cleanup errors
 
 
 
@@ -865,7 +980,7 @@ def performance(
     # Default: show performance status
     profiler = get_profiler()
     if profiler.enabled:
-        console.print("[green]✅ Performance monitoring is enabled[/green]")
+        console.print("[green]Performance monitoring is enabled[/green]")
         report = profiler.generate_report()
         if report.operations_count > 0:
             console.print(f"Current session: {report.operations_count} operations, {report.total_duration:.2f}s total")

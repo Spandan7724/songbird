@@ -22,6 +22,7 @@ class ModelCommand(BaseCommand):
         provider_name = context.get("provider", "")
         current_model = context.get("model", "")
         provider_instance = context.get("provider_instance")
+        orchestrator = context.get("orchestrator")
 
         if not provider_name:
             return CommandResult(
@@ -29,30 +30,85 @@ class ModelCommand(BaseCommand):
                 message="No provider available in current context"
             )
 
-        # Get available models
-        models = self._get_available_models(provider_name)
+        # Check if we're using LiteLLM or legacy provider
+        is_litellm = self._is_litellm_provider(provider_instance)
+        
+        # Get available models based on provider type
+        if is_litellm:
+            models = self._get_litellm_models(provider_name)
+        else:
+            models = self._get_available_models(provider_name)
+            
         if not models:
             return CommandResult(
                 success=False,
                 message=f"No models available for provider: {provider_name}"
             )
 
-        # If args provided, try to set model directly
+        # If args provided, try to set model directly or handle special commands
         if args.strip():
-            new_model = args.strip()
-            if new_model in models:
-                if provider_instance:
-                    provider_instance.model = new_model
-                return CommandResult(
-                    success=True,
-                    message=f"Switched to model: {new_model}",
-                    data={"new_model": new_model}
-                )
+            arg = args.strip()
+            
+            # Handle cache invalidation command
+            if arg == "--refresh" or arg == "--reload":
+                try:
+                    from ..llm.providers import invalidate_model_cache
+                    invalidate_model_cache(provider_name)
+                    return CommandResult(
+                        success=True,
+                        message=f"Model cache refreshed for {provider_name}"
+                    )
+                except Exception as e:
+                    return CommandResult(
+                        success=False,
+                        message=f"Failed to refresh cache: {e}"
+                    )
+            
+            new_model = arg
+            
+            # For LiteLLM, we need to resolve the model string
+            if is_litellm:
+                resolved_model = self._resolve_litellm_model(provider_name, new_model)
+                if resolved_model and self._is_valid_litellm_model(provider_name, new_model):
+                    if provider_instance:
+                        # Use set_model if available (LiteLLM adapter) for proper state flush
+                        if hasattr(provider_instance, 'set_model'):
+                            provider_instance.set_model(resolved_model)
+                        else:
+                            provider_instance.model = resolved_model
+                        # Update session if available 
+                        if orchestrator and orchestrator.session:
+                            orchestrator.session.update_litellm_config(
+                                provider=provider_name,
+                                model=new_model,
+                                litellm_model=resolved_model
+                            )
+                            orchestrator.session_manager.save_session(orchestrator.session)
+                    return CommandResult(
+                        success=True,
+                        message=f"Switched to model: {new_model} (LiteLLM: {resolved_model})",
+                        data={"new_model": new_model}
+                    )
+                else:
+                    return CommandResult(
+                        success=False,
+                        message=f"Model '{new_model}' not available for LiteLLM provider '{provider_name}'. Use /model to see available models."
+                    )
             else:
-                return CommandResult(
-                    success=False,
-                    message=f"Model '{new_model}' not available. Use /model to see available models."
-                )
+                # Legacy provider handling
+                if new_model in models:
+                    if provider_instance:
+                        provider_instance.model = new_model
+                    return CommandResult(
+                        success=True,
+                        message=f"Switched to model: {new_model}",
+                        data={"new_model": new_model}
+                    )
+                else:
+                    return CommandResult(
+                        success=False,
+                        message=f"Model '{new_model}' not available. Use /model to see available models."
+                    )
 
         # Show current model info
         self.console.print(
@@ -97,18 +153,72 @@ class ModelCommand(BaseCommand):
                 message=f"Model unchanged: {selected_model}"
             )
 
-        # Update the model
-        if provider_instance:
-            provider_instance.model = selected_model
+        # Update the model based on provider type
+        if is_litellm:
+            # For LiteLLM, resolve the model string
+            resolved_model = self._resolve_litellm_model(provider_name, selected_model)
+            if provider_instance and resolved_model:
+                # Use set_model if available (LiteLLM adapter) for proper state flush
+                if hasattr(provider_instance, 'set_model'):
+                    provider_instance.set_model(resolved_model)
+                else:
+                    provider_instance.model = resolved_model
+                # Update session if available
+                if orchestrator and orchestrator.session:
+                    orchestrator.session.update_litellm_config(
+                        provider=provider_name,
+                        model=selected_model,
+                        litellm_model=resolved_model
+                    )
+                    orchestrator.session_manager.save_session(orchestrator.session)
+            
+            return CommandResult(
+                success=True,
+                message=f"Switched to model: {selected_model} (LiteLLM: {resolved_model})",
+                data={"new_model": selected_model}
+            )
+        else:
+            # Legacy provider handling
+            if provider_instance:
+                provider_instance.model = selected_model
 
-        return CommandResult(
-            success=True,
-            message=f"Switched to model: {selected_model}",
-            data={"new_model": selected_model}
-        )
+            return CommandResult(
+                success=True,
+                message=f"Switched to model: {selected_model}",
+                data={"new_model": selected_model}
+            )
 
     def _get_available_models(self, provider_name: str) -> List[str]:
-        """Get available models for a provider."""
+        """Get available models for a provider using dynamic discovery."""
+        try:
+            # Try dynamic discovery first
+            from ..llm.providers import get_models_for_provider
+            import asyncio
+            
+            # Run model discovery
+            def run_discovery():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(get_models_for_provider(provider_name, use_cache=True))
+                except Exception:
+                    return []
+                finally:
+                    loop.close()
+            
+            discovered_models = run_discovery()
+            
+            if discovered_models:
+                self.console.print(f"[dim]Found {len(discovered_models)} models via discovery for {provider_name}[/dim]")
+                return discovered_models
+            
+            # Fallback to legacy methods
+            self.console.print(f"[dim]Using legacy model discovery for {provider_name}[/dim]")
+            
+        except Exception as e:
+            self.console.print(f"[yellow]Discovery failed for {provider_name}: {e}[/yellow]")
+        
+        # Legacy fallback methods
         if provider_name == "ollama":
             return self._get_ollama_models()
         elif provider_name == "gemini":
@@ -284,22 +394,154 @@ class ModelCommand(BaseCommand):
             "google/gemini-2.0-flash-001"
         ]
 
+    def _is_litellm_provider(self, provider_instance) -> bool:
+        """Check if the provider instance is a LiteLLM adapter."""
+        if not provider_instance:
+            return False
+        return hasattr(provider_instance, 'vendor_prefix') and hasattr(provider_instance, 'model_name')
+    
+    def _get_litellm_models(self, provider_name: str) -> List[str]:
+        """Get available models for LiteLLM provider using dynamic discovery."""
+        try:
+            # Try dynamic discovery first
+            from ..llm.providers import get_models_for_provider
+            import asyncio
+            
+            # Run model discovery
+            def run_discovery():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(get_models_for_provider(provider_name, use_cache=True))
+                except Exception:
+                    return []
+                finally:
+                    loop.close()
+            
+            discovered_models = run_discovery()
+            
+            if discovered_models:
+                self.console.print(f"[dim]Found {len(discovered_models)} models via discovery for {provider_name}[/dim]")
+                return discovered_models
+            
+            # Fallback to configuration-based models
+            from ..config import load_provider_mapping
+            config = load_provider_mapping()
+            
+            models = []
+            
+            # Add default model
+            default_model = config.get_default_model(provider_name)
+            if default_model:
+                # Extract the model name part after the provider prefix
+                if "/" in default_model:
+                    model_name = default_model.split("/", 1)[1]
+                    models.append(model_name)
+            
+            # Add all mapped models for this provider
+            available_models = config.get_available_models(provider_name)
+            for model_name in available_models:
+                if model_name not in models:
+                    models.append(model_name)
+            
+            # Add some common models if none found
+            if not models:
+                models = self._get_fallback_litellm_models(provider_name)
+            
+            return models
+            
+        except Exception as e:
+            self.console.print(f"[yellow]Warning: Failed to load models: {e}[/yellow]")
+            return self._get_fallback_litellm_models(provider_name)
+    
+    def _get_fallback_litellm_models(self, provider_name: str) -> List[str]:
+        """Get fallback models for LiteLLM provider."""
+        fallback_models = {
+            "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
+            "claude": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+            "gemini": ["gemini-2.0-flash-001", "gemini-1.5-pro", "gemini-1.5-flash"],
+            "ollama": ["qwen2.5-coder:7b", "llama3.2:latest", "codellama:latest"],
+            "openrouter": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o", "deepseek/deepseek-chat-v3-0324:free"]
+        }
+        return fallback_models.get(provider_name, [])
+    
+    def _resolve_litellm_model(self, provider_name: str, model_name: str) -> str:
+        """Resolve a model name to LiteLLM model string with fallback warnings."""
+        try:
+            from ..config import load_provider_mapping
+            config = load_provider_mapping()
+            
+            # Try to resolve through configuration
+            try:
+                resolved = config.resolve_model_string(provider_name, model_name)
+                if resolved:
+                    return resolved
+            except ValueError:
+                # Config doesn't have this model, continue to fallback
+                pass
+            
+            # Check if model is in our known models list
+            available_models = self._get_litellm_models(provider_name)
+            if model_name not in available_models:
+                self.console.print(f"[yellow]⚠️  Unknown model '{model_name}' for provider '{provider_name}'[/yellow]")
+                self.console.print(f"[yellow]   Available models: {', '.join(available_models[:3])}{'...' if len(available_models) > 3 else ''}[/yellow]")
+                self.console.print(f"[yellow]   Attempting to use model anyway with LiteLLM...[/yellow]")
+            
+            # Fallback: construct model string with warning
+            constructed = f"{provider_name}/{model_name}"
+            if model_name not in available_models:
+                self.console.print(f"[dim]   Using constructed model string: {constructed}[/dim]")
+            
+            return constructed
+            
+        except Exception as e:
+            # Final fallback with error message
+            self.console.print(f"[red]Error resolving model '{model_name}' for provider '{provider_name}': {e}[/red]")
+            fallback = f"{provider_name}/{model_name}"
+            self.console.print(f"[yellow]Using fallback model string: {fallback}[/yellow]")
+            return fallback
+    
+    def _is_valid_litellm_model(self, provider_name: str, model_name: str) -> bool:
+        """Check if a model is valid for the LiteLLM provider with fallback support."""
+        try:
+            available_models = self._get_litellm_models(provider_name)
+            
+            # Allow exact matches from our configuration
+            if model_name in available_models:
+                return True
+            
+            # Allow unknown models with a warning (LiteLLM might support it)
+            self.console.print(f"[dim]Model '{model_name}' not in known list, allowing fallback attempt[/dim]")
+            return True
+            
+        except Exception:
+            # If we can't load models, allow the attempt anyway
+            return True
+
     def get_help(self) -> str:
         """Get detailed help for the model command."""
         return """
 [bold]Usage:[/bold]
   /model              - Show interactive model selection menu
   /model <name>       - Switch to specific model directly
+  /model --refresh    - Refresh model cache and show updated models
+  /model --reload     - Same as --refresh
 
 [bold]Examples:[/bold]
   /model              - Opens interactive menu with arrow key navigation
   /model gemini-2.0-flash-exp     - Switch to Gemini 2.0 Flash
   /model qwen2.5-coder:7b         - Switch to Qwen 2.5 Coder
+  /model --refresh    - Reload available models from provider APIs
 
 [bold]Interactive Menu:[/bold]
   • Use ↑↓ arrow keys to navigate
   • Press Enter to select
   • Press Ctrl+C to cancel
+
+[bold]Model Discovery:[/bold]
+  • Models are automatically discovered from provider APIs
+  • Results are cached for 5 minutes for performance
+  • Use --refresh to force reload from APIs
 
 [bold]Shortcuts:[/bold]
   /m                  - Same as /model

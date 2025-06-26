@@ -116,10 +116,42 @@ class Session:
 
         return summary
 
-    def update_provider_config(self, provider: str, model: str):
+    def update_provider_config(self, provider: str, model: str, provider_type: str = "legacy"):
         """Update the provider configuration for this session."""
         self.provider_config = {
             "provider": provider,
-            "model": model
+            "model": model,
+            "provider_type": provider_type,  # "legacy" or "litellm"
+            "updated_at": datetime.now().isoformat()
         }
         self.updated_at = datetime.now()
+    
+    def update_litellm_config(self, provider: str, model: str, litellm_model: str, api_base: Optional[str] = None):
+        """Update the provider configuration for LiteLLM usage."""
+        self.provider_config = {
+            "provider": provider,
+            "model": model,
+            "provider_type": "litellm",
+            "litellm_model": litellm_model,  # The full LiteLLM model string like "openai/gpt-4o"
+            "api_base": api_base,
+            "updated_at": datetime.now().isoformat()
+        }
+        self.updated_at = datetime.now()
+    
+    def get_provider_type(self) -> str:
+        """Get the provider type (legacy or litellm)."""
+        return self.provider_config.get("provider_type", "legacy")
+    
+    def get_litellm_model(self) -> Optional[str]:
+        """Get the LiteLLM model string if using LiteLLM."""
+        if self.get_provider_type() == "litellm":
+            return self.provider_config.get("litellm_model")
+        return None
+    
+    def get_api_base(self) -> Optional[str]:
+        """Get the API base URL if specified."""
+        return self.provider_config.get("api_base")
+    
+    def is_litellm_session(self) -> bool:
+        """Check if this session is using LiteLLM."""
+        return self.get_provider_type() == "litellm"

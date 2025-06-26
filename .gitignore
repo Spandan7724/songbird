@@ -37,6 +37,8 @@ SONGBIRD_REPAIR_PLAN.md
 COMPLETION_SUMMARY.md
 CHANGELOG.md
 GEMINI.md
+LITELLM_IMPLEMENTATION_PLAN.md
+LITELLM_MIGRATION_GUIDE.md
 songbird.egg-info/
 songbird/__pycache__/
 tests/__pycache__
