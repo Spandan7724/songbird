@@ -19,7 +19,7 @@ class PlanManager:
     async def generate_plan_prompt(self, user_request: str, context: Dict[str, Any]) -> str:
         """Generate a prompt for the LLM to create an execution plan."""
         
-        # Like Claude Code, show plans for most multi-step tasks
+
         planning_indicators = [
             # File operations
             "create", "build", "make", "generate", "write", "add", "implement",
@@ -33,8 +33,7 @@ class PlanManager:
         
         request_lower = user_request.lower()
         has_planning_indicator = any(indicator in request_lower for indicator in planning_indicators)
-        
-        # More generous planning conditions like Claude Code
+
         should_plan = (
             has_planning_indicator or  # Contains planning keywords
             len(user_request.split()) >= 8 or  # Reasonably long request

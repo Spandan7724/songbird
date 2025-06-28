@@ -21,7 +21,7 @@ class LLMConfig:
     })
     max_tokens: int = 4096
     temperature: float = 0.7
-    timeout: int = 60
+    timeout: int = 120  # Increased for long conversations
 
 
 @dataclass
@@ -37,11 +37,11 @@ class SessionConfig:
 @dataclass
 class ToolConfig:
     """Configuration for tool execution."""
-    default_timeout: int = 30
+    default_timeout: int = 60  # Increased for long tasks
     max_parallel_tools: int = 5
     enable_confirmations: bool = True
     auto_backup: bool = False
-    shell_timeout: int = 60
+    shell_timeout: int = 120  # Increased for long-running commands
 
 
 @dataclass
@@ -57,8 +57,8 @@ class UIConfig:
 @dataclass
 class AgentConfig:
     """Configuration for agent behavior."""
-    max_iterations: int = 15
-    token_budget: int = 50000
+    max_iterations: int = 50  # Increased for long tasks
+    token_budget: int = 150000  # Increased for complex tasks
     planning_enabled: bool = True
     auto_todo_completion: bool = True
     adaptive_termination: bool = True

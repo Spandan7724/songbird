@@ -399,7 +399,7 @@ class ToolRegistry:
                         "timeout": {
                             "type": "integer",
                             "description": "Timeout in seconds",
-                            "default": 30
+                            "default": 120
                         }
                     },
                     "required": ["command"]

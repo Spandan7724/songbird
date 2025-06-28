@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import logging
 from typing import Any, Dict, List, Optional, Protocol
 from datetime import datetime
 
@@ -13,6 +14,10 @@ from ..memory.manager import SessionManager
 from ..tools.todo_tools import auto_complete_todos_from_message
 from .planning import AgentPlan, PlanStep, PlanStatus
 from .plan_manager import PlanManager
+from ..config.config_manager import get_config
+
+# Configure logger for agent core
+logger = logging.getLogger(__name__)
 
 
 class ToolRunnerProtocol(Protocol):
@@ -112,15 +117,14 @@ class AgentCore:
             pass
     
     async def _display_plan(self, plan) -> None:
-        """Display the generated plan to the user like Claude Code's todos."""
+
         try:
             from rich.console import Console
             from rich.panel import Panel
             from rich.text import Text
             
             console = Console()
-            
-            # Create plan display like Claude Code
+
             plan_display = Text()
             plan_display.append(f"{plan.goal}\n\n", style="white")
             
@@ -135,7 +139,7 @@ class AgentCore:
                     args = step.get('args', {})
                     description = step.get('description', '')
                 
-                # Format step with bullet point like Claude Code todos
+
                 plan_display.append(" • ", style="blue")
                 
                 # Format step description based on action
@@ -181,19 +185,31 @@ class AgentCore:
     
     async def _agentic_loop(self) -> AgentOutput:
         """Main agentic loop for autonomous task execution with adaptive termination."""
-        # Adaptive termination criteria
-        max_iterations = 15  # Emergency brake
+        # Get configuration for termination criteria
+        config = get_config()
+        max_iterations = config.agent.max_iterations  # Configurable emergency brake
         iteration_count = 0
         consecutive_no_tools = 0
         total_tokens_used = 0
-        max_tokens_budget = 50000  # Reasonable limit for complex tasks
+        max_tokens_budget = config.agent.token_budget  # Configurable token budget
         
         # Track repeated failed tool calls to detect infinite loops
         recent_failed_calls = []
         max_repeated_failures = 3
         
+        # Logging for long-task diagnosis
+        loop_start_time = datetime.now()
+        logger.info(f"Starting agentic loop with max_iterations={max_iterations}, token_budget={max_tokens_budget}")
+        
+        # Enable verbose logging if configured
+        verbose_logging = config.ui.verbose_logging
+        
         while iteration_count < max_iterations:
             iteration_count += 1
+            iteration_start_time = datetime.now()
+            
+            if verbose_logging:
+                logger.debug(f"Iteration {iteration_count}: Starting with {consecutive_no_tools} consecutive no-tool turns")
             
             # Get available tools
             tools = self.tool_runner.get_available_tools()
@@ -202,6 +218,9 @@ class AgentCore:
             messages = self._build_messages_for_llm()
             
             # Get LLM response
+            if verbose_logging:
+                logger.debug(f"Iteration {iteration_count}: Requesting LLM response with {len(tools)} tools available")
+            
             response = await self.provider.chat_with_messages(messages, tools=tools)
             
             # Track token usage (approximate)
@@ -213,11 +232,15 @@ class AgentCore:
                 # Reset consecutive no-tool counter
                 consecutive_no_tools = 0
                 
+                if verbose_logging:
+                    logger.debug(f"Iteration {iteration_count}: Executing {len(response.tool_calls)} tool calls")
+                
                 # Execute tools and continue loop
                 tool_results = await self._execute_tools(response.tool_calls)
                 
                 # Check for repeated failed tool calls (infinite loop detection)
                 if self._detect_repeated_failures(tool_results, recent_failed_calls, max_repeated_failures):
+                    logger.warning(f"Iteration {iteration_count}: Detected repeated failures - terminating loop")
                     await self._add_assistant_message_to_history(response, tool_results)
                     assistant_message = UIMessage.assistant(
                         "I've detected that I'm repeating the same failed operation. The task appears to be complete or I need different instructions to proceed."
@@ -226,6 +249,7 @@ class AgentCore:
                 
                 # Check if recent successful operations suggest task completion
                 if self._detect_likely_completion(tool_results, iteration_count):
+                    logger.info(f"Iteration {iteration_count}: Detected likely task completion - terminating loop")
                     await self._add_assistant_message_to_history(response, tool_results)
                     assistant_message = UIMessage.assistant(
                         "Task appears to be completed successfully based on the recent successful operations."
@@ -237,11 +261,13 @@ class AgentCore:
                 
                 # Check ONLY extreme termination criteria when tools are being used
                 if total_tokens_used > max_tokens_budget:
+                    logger.warning(f"Iteration {iteration_count}: Token budget exceeded ({total_tokens_used}/{max_tokens_budget}) - terminating")
                     assistant_message = UIMessage.assistant(
                         f"I've completed {iteration_count} steps and reached the token budget limit. Stopping here."
                     )
                     return AgentOutput.completion(assistant_message)
                 elif iteration_count >= max_iterations - 1:  # Emergency brake
+                    logger.warning(f"Iteration {iteration_count}: Maximum iterations reached - emergency termination")
                     assistant_message = UIMessage.assistant(
                         f"I've completed {iteration_count} steps (maximum reached). The task may require additional work."
                     )
@@ -253,8 +279,12 @@ class AgentCore:
                 # No tool calls - increment counter
                 consecutive_no_tools += 1
                 
+                if verbose_logging:
+                    logger.debug(f"Iteration {iteration_count}: No tool calls, consecutive count: {consecutive_no_tools}")
+                
                 # Check if we should terminate due to no tool usage
                 if consecutive_no_tools >= 2:
+                    logger.info(f"Iteration {iteration_count}: Two consecutive no-tool turns - terminating (task likely complete)")
                     # Two consecutive turns without tools - task likely complete
                     await self._add_final_assistant_message(response)
                     assistant_message = UIMessage.assistant(response.content or "")
@@ -271,6 +301,10 @@ class AgentCore:
                     return AgentOutput.completion(assistant_message)
         
         # Maximum iterations reached
+        loop_duration = datetime.now() - loop_start_time
+        logger.warning(f"Agentic loop terminated after {iteration_count} iterations in {loop_duration}")
+        logger.info(f"Final stats: {total_tokens_used} tokens used, {consecutive_no_tools} consecutive no-tool turns")
+        
         assistant_message = UIMessage.assistant(
             "I've reached the maximum number of steps for this task. The work may be incomplete."
         )
@@ -429,12 +463,18 @@ Remember to follow the plan systematically. Complete the current step before mov
     
     def _detect_likely_completion(self, tool_results: List[Dict[str, Any]], iteration_count: int) -> bool:
         """Detect if task is likely complete based on successful operations."""
-        if iteration_count < 3:  # Don't terminate too early
+        if iteration_count < 5:  # Don't terminate too early - increased from 3
             return False
+        
+        # Get configuration to make completion detection configurable
+        config = get_config()
+        if not config.agent.adaptive_termination:
+            return False  # Let user control termination if adaptive is disabled
         
         # Check if we just had successful file operations that likely fulfill the request
         successful_file_ops = 0
         successful_shell_ops = 0
+        failed_ops = 0
         
         for result in tool_results:
             function_name = result.get("function_name", "")
@@ -445,17 +485,29 @@ Remember to follow the plan systematically. Complete the current step before mov
                     successful_file_ops += 1
                 elif function_name == "shell_exec":
                     successful_shell_ops += 1
+            else:
+                failed_ops += 1
+        
+        # Don't terminate if there are recent failures - the task may need more work
+        if failed_ops > 0:
+            return False
         
         # More conservative completion detection to prevent premature termination
         # Only terminate if we have many iterations with successful operations,
         # indicating the task is truly complete
         
         # For file operations, require more iterations to avoid cutting off multi-file tasks
-        if successful_file_ops > 0 and iteration_count >= 6:
+        if successful_file_ops > 0 and iteration_count >= 12:
+            # Additional check: only terminate if no plan is active or plan is complete
+            if self.current_plan and not self.plan_manager.is_plan_complete():
+                return False
             return True
         
         # For shell operations, be even more conservative since they're often part of larger workflows
-        if successful_shell_ops > 0 and iteration_count >= 8:
+        if successful_shell_ops > 0 and iteration_count >= 15:
+            # Additional check: only terminate if no plan is active or plan is complete
+            if self.current_plan and not self.plan_manager.is_plan_complete():
+                return False
             return True
             
         return False
