@@ -174,10 +174,10 @@ class OpenAIModelDiscovery(BaseModelDiscovery):
                     created=model.created if hasattr(model, 'created') else None
                 ))
             
-            # Sort by creation date (newest first) and take top 10
+            # Sort by creation date (newest first) and return all
             if discovered_models:
                 discovered_models.sort(key=lambda x: x.created or 0, reverse=True)
-                return discovered_models[:10]
+                return discovered_models
             
         except Exception as e:
             logger.debug(f"OpenAI API discovery failed: {e}")
@@ -258,32 +258,87 @@ class OllamaModelDiscovery(BaseModelDiscovery):
     
     async def _discover_models(self) -> List[DiscoveredModel]:
         """Discover locally installed Ollama models."""
+        # First check if Ollama service is running
+        if not await self._check_ollama_service():
+            logger.debug("Ollama service not available")
+            return self._get_fallback_models()
+        
         try:
-            import ollama
+            # Try using the ollama Python library first
+            try:
+                import ollama
+                models_response = await asyncio.to_thread(ollama.list)
+                
+                discovered_models = []
+                for model in models_response.get('models', []):
+                    model_name = model.get('name', '')
+                    if model_name:
+                        discovered_models.append(DiscoveredModel(
+                            id=model_name,
+                            name=model_name.split(':')[0].title(),  # Remove tag for display
+                            provider="ollama",
+                            supports_function_calling=True,  # Most modern Ollama models support this
+                            supports_streaming=True,
+                            description=f"Local model ({model.get('size', 'unknown size')})"
+                        ))
+                
+                if discovered_models:
+                    logger.debug(f"Discovered {len(discovered_models)} Ollama models via Python library")
+                    return discovered_models
+                    
+            except ImportError:
+                logger.debug("ollama Python library not available, trying HTTP API")
             
-            # Get locally installed models
-            models_response = await asyncio.to_thread(ollama.list)
-            
-            discovered_models = []
-            for model in models_response.get('models', []):
-                model_name = model.get('name', '')
-                if model_name:
-                    discovered_models.append(DiscoveredModel(
-                        id=model_name,
-                        name=model_name.split(':')[0].title(),  # Remove tag for display
-                        provider="ollama",
-                        supports_function_calling=True,  # Most modern Ollama models support this
-                        supports_streaming=True,
-                        description=f"Local model ({model.get('size', 'unknown size')})"
-                    ))
-            
+            # Fallback to HTTP API
+            discovered_models = await self._discover_via_http()
             if discovered_models:
+                logger.debug(f"Discovered {len(discovered_models)} Ollama models via HTTP API")
                 return discovered_models
             
         except Exception as e:
-            logger.debug(f"Ollama discovery failed: {e}")
+            logger.warning(f"Ollama discovery failed: {e}")
         
+        logger.debug("No Ollama models discovered, using fallback")
         return self._get_fallback_models()
+    
+    async def _check_ollama_service(self) -> bool:
+        """Check if Ollama service is running on localhost:11434."""
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get("http://localhost:11434/api/version")
+                return response.status_code == 200
+        except Exception:
+            return False
+    
+    async def _discover_via_http(self) -> List[DiscoveredModel]:
+        """Discover Ollama models via HTTP API."""
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get("http://localhost:11434/api/tags")
+                if response.status_code == 200:
+                    data = response.json()
+                    models = data.get('models', [])
+                    
+                    discovered_models = []
+                    for model in models:
+                        model_name = model.get('name', '')
+                        if model_name:
+                            discovered_models.append(DiscoveredModel(
+                                id=model_name,
+                                name=model_name.split(':')[0].title(),
+                                provider="ollama",
+                                supports_function_calling=True,
+                                supports_streaming=True,
+                                description=f"Local model ({model.get('size', 'unknown size')})"
+                            ))
+                    
+                    return discovered_models
+        except Exception as e:
+            logger.debug(f"HTTP API discovery failed: {e}")
+        
+        return []
 
 
 class OpenRouterModelDiscovery(BaseModelDiscovery):
@@ -360,9 +415,9 @@ class OpenRouterModelDiscovery(BaseModelDiscovery):
             
             discovered_models.sort(key=sort_key)
             
-            # Return tool-capable models (limit to reasonable number for menu)
+            # Return all tool-capable models
             if discovered_models:
-                return discovered_models[:25]  # Increased limit for more choice
+                return discovered_models
             
         except Exception as e:
             logger.debug(f"OpenRouter API discovery failed: {e}")

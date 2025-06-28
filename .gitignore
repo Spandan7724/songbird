@@ -38,6 +38,7 @@ COMPLETION_SUMMARY.md
 CHANGELOG.md
 GEMINI.md
 LITELLM_IMPLEMENTATION_PLAN.md
+my_diff.md
 songbird.egg-info/
 songbird/__pycache__/
 tests/__pycache__

@@ -203,8 +203,8 @@ class PromptToolkitInputHandler:
         if user_input == "/":
             # Show command help
             self._show_commands()
-            # Get input again
-            return await self.get_input_with_commands(prompt, context)
+            # Return empty string to let main loop handle it
+            return ""
 
         elif user_input.startswith("/") and " " not in user_input:
             # Check if it's a valid command or alias
@@ -219,8 +219,8 @@ class PromptToolkitInputHandler:
                 self.console.print(f"[red]Unknown command: {user_input}[/red]")
                 self.console.print("Available commands:")
                 self._show_commands()
-                # Get input again
-                return await self.get_input_with_commands(prompt, context)
+                # Return empty string to let main loop handle it
+                return ""
 
         # Regular input or command with args
         return user_input

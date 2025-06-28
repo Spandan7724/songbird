@@ -146,34 +146,44 @@ class AIOHTTPSessionManager:
         # Clear our session tracking
         AIOHTTPSessionManager._all_sessions.clear()
         
-        # Force garbage collection to trigger any remaining cleanup
-        gc.collect()
-        
-        # Give time for all cleanup to complete
-        await asyncio.sleep(0.2)
+        # Suppress socket ResourceWarnings during cleanup
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=ResourceWarning, message=".*unclosed.*socket.*")
+            
+            # Force garbage collection to trigger any remaining cleanup
+            gc.collect()
+            
+            # Give time for all cleanup to complete
+            await asyncio.sleep(0.2)
+            
+            # Force another garbage collection to ensure everything is cleaned up
+            gc.collect()
     
     def _cleanup_on_exit(self) -> None:
         """
         Cleanup handler called during Python exit.
         
-        This runs synchronously during exit, so we need to handle async cleanup carefully.
+        During exit, avoid async operations and just clear references.
         """
         try:
-            # Try to get the current event loop
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If loop is running, schedule cleanup as a task
-                loop.create_task(self.close_all_sessions())
-            else:
-                # If no loop is running, run cleanup synchronously
-                loop.run_until_complete(self.close_all_sessions())
-        except RuntimeError:
-            # No event loop available, try to create one
-            try:
-                asyncio.run(self.close_all_sessions())
-            except Exception as e:
-                # Final fallback - at least log the issue
-                logger.debug(f"Could not close aiohttp sessions during exit: {e}")
+            # During Python exit, don't run async operations
+            # Just clear session references and suppress warnings
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=ResourceWarning)
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                
+                # Clear session references
+                if AIOHTTPSessionManager._session:
+                    AIOHTTPSessionManager._session = None
+                
+                AIOHTTPSessionManager._all_sessions.clear()
+                logger.debug("aiohttp session references cleared during exit")
+                
+        except Exception as e:
+            # Don't let cleanup errors prevent shutdown
+            pass
     
     async def health_check(self) -> bool:
         """

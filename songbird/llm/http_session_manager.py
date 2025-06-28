@@ -33,10 +33,9 @@ class HTTPSessionManager:
         """Initialize the session manager."""
         if not hasattr(self, '_initialized'):
             self._initialized = True
-            # Register cleanup handler only once
-            if not HTTPSessionManager._cleanup_registered:
-                atexit.register(self._cleanup_on_exit)
-                HTTPSessionManager._cleanup_registered = True
+            # Skip atexit registration for httpx sessions since we handle cleanup explicitly
+            # The aiohttp session manager handles the atexit cleanup comprehensively
+            HTTPSessionManager._cleanup_registered = True
     
     async def get_session(self) -> httpx.AsyncClient:
         """
@@ -93,24 +92,25 @@ class HTTPSessionManager:
         """
         Cleanup handler called during Python exit.
         
-        This runs synchronously during exit, so we need to handle async cleanup.
+        This runs synchronously during exit, so we need to handle async cleanup carefully.
         """
         try:
-            # Try to get the current event loop
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If loop is running, schedule cleanup as a task
-                loop.create_task(self.close_session())
-            else:
-                # If no loop is running, run cleanup synchronously
-                loop.run_until_complete(self.close_session())
-        except RuntimeError:
-            # No event loop available, try to create one
-            try:
-                asyncio.run(self.close_session())
-            except Exception as e:
-                # Final fallback - at least log the issue
-                logger.debug(f"Could not close HTTP session during exit: {e}")
+            # During exit, we should avoid async operations that might fail
+            # Instead, just mark the session as None and let garbage collection handle it
+            if HTTPSessionManager._session and not HTTPSessionManager._session.is_closed:
+                try:
+                    # Try a synchronous close if possible
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=RuntimeWarning)
+                        # Don't try to run async code during exit - just clear the reference
+                        HTTPSessionManager._session = None
+                        logger.debug("HTTP session reference cleared during exit")
+                except Exception as e:
+                    logger.debug(f"Error during exit cleanup: {e}")
+        except Exception as e:
+            # Don't let cleanup errors prevent shutdown
+            pass
     
     async def health_check(self) -> bool:
         """

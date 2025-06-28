@@ -861,7 +861,7 @@ class LiteLLMAdapter(UnifiedProviderInterface):
                 logger.warning(f"Model '{self.model}' has no provider prefix, keeping existing vendor_prefix: {self.vendor_prefix}")
                 self.model_name = self.model
             
-            console.print(f"[dim]State flushed for model change: {self.vendor_prefix}/{self.model_name}[/dim]")
+            # State flushed silently - UI will show model change confirmation
             
         except Exception as e:
             logger.error(f"Error flushing state: {e}")
@@ -877,7 +877,7 @@ class LiteLLMAdapter(UnifiedProviderInterface):
         self.model = new_model
         
         if old_model != new_model:
-            logger.info(f"Model changed from {old_model} to {new_model}")
+            logger.debug(f"Model changed from {old_model} to {new_model}")
             self.flush_state()
             # Re-validate the new model
             self._validate_model_compatibility()

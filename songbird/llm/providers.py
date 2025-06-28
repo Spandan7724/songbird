@@ -60,18 +60,20 @@ def create_litellm_provider(provider_name: str, model: str = None, api_base: str
     return adapter
 
 
-def get_copilot_provider(model: str = None, **kwargs):
+def get_copilot_provider(model: str = None, quiet: bool = False, **kwargs):
     """Create a custom GitHub Copilot provider instance."""
     if not model:
         model = "gpt-4o"  # Default model for Copilot
     
     try:
         provider = CopilotProvider(model=model, **kwargs)
-        console.print(f"✓ COPILOT_ACCESS_TOKEN configured: {os.getenv('COPILOT_ACCESS_TOKEN', 'Not set')[:10]}...{os.getenv('COPILOT_ACCESS_TOKEN', '')[-4:] if os.getenv('COPILOT_ACCESS_TOKEN') else ''}")
-        console.print(f"GitHub Copilot provider initialized: {model}")
+        if not quiet:
+            console.print(f"[dim]✓ COPILOT_ACCESS_TOKEN configured: {os.getenv('COPILOT_ACCESS_TOKEN', 'Not set')[:10]}...{os.getenv('COPILOT_ACCESS_TOKEN', '')[-4:] if os.getenv('COPILOT_ACCESS_TOKEN') else ''}[/dim]")
+            console.print(f"GitHub Copilot provider initialized: {model}")
         return provider
     except Exception as e:
-        console.print(f"[red]Failed to initialize GitHub Copilot provider: {e}[/red]")
+        if not quiet:
+            console.print(f"[red]Failed to initialize GitHub Copilot provider: {e}[/red]")
         raise e
 
 
