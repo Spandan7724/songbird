@@ -19,21 +19,34 @@ class PlanManager:
     async def generate_plan_prompt(self, user_request: str, context: Dict[str, Any]) -> str:
         """Generate a prompt for the LLM to create an execution plan."""
         
-        # Determine if this requires planning
-        complexity_indicators = [
-            "create", "build", "implement", "setup", "configure", "install",
-            "multiple", "several", "all", "entire", "complete", "full",
-            "project", "application", "system", "feature", "module"
+        # Like Claude Code, show plans for most multi-step tasks
+        planning_indicators = [
+            # File operations
+            "create", "build", "make", "generate", "write", "add", "implement",
+            # Multi-step words
+            "multiple", "several", "all", "entire", "complete", "full", "and",
+            # Project words
+            "project", "application", "system", "feature", "module", "setup", "configure", "install",
+            # Numbers that suggest multiple items
+            "three", "four", "five", "2", "3", "4", "5", "two", "both"
         ]
         
         request_lower = user_request.lower()
-        is_complex = any(indicator in request_lower for indicator in complexity_indicators)
+        has_planning_indicator = any(indicator in request_lower for indicator in planning_indicators)
         
-        if not is_complex and len(user_request.split()) < 10:
-            # Simple request - no planning needed
+        # More generous planning conditions like Claude Code
+        should_plan = (
+            has_planning_indicator or  # Contains planning keywords
+            len(user_request.split()) >= 8 or  # Reasonably long request
+            " and " in request_lower or  # Multiple actions connected by "and"
+            request_lower.count(",") >= 1  # Multiple items separated by commas
+        )
+        
+        if not should_plan:
+            # Simple single-action request - no planning needed
             return ""
         
-        # Generate planning prompt for complex requests using centralized template
+        # Generate planning prompt for multi-step requests using centralized template
         from ..prompts import get_planning_prompt_template
         plan_prompt_template = get_planning_prompt_template()
         plan_prompt = plan_prompt_template.format(user_request=user_request)

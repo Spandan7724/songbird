@@ -112,50 +112,67 @@ class AgentCore:
             pass
     
     async def _display_plan(self, plan) -> None:
-        """Display the generated plan to the user."""
+        """Display the generated plan to the user like Claude Code's todos."""
         try:
             from rich.console import Console
             from rich.panel import Panel
-            from rich.markdown import Markdown
+            from rich.text import Text
             
             console = Console()
             
-            # Create plan display
-            plan_text = f"**Goal:** {plan.goal}\n\n"
-            plan_text += "**Plan:**\n\n"
+            # Create plan display like Claude Code
+            plan_display = Text()
+            plan_display.append(f"{plan.goal}\n\n", style="white")
             
-            for i, step in enumerate(plan.plan, 1):
-                action = step.get('action', 'unknown')
-                args = step.get('args', {})
+            for i, step in enumerate(plan.steps, 1):
+                # Handle both dict and PlanStep object formats
+                if hasattr(step, 'action'):  # PlanStep object
+                    action = step.action
+                    args = step.args
+                    description = step.description
+                else:  # Dict format
+                    action = step.get('action', 'unknown')
+                    args = step.get('args', {})
+                    description = step.get('description', '')
                 
-                # Format step description
+                # Format step with bullet point like Claude Code todos
+                plan_display.append(" • ", style="blue")
+                
+                # Format step description based on action
                 if action == 'file_create':
                     file_path = args.get('file_path', 'unknown')
-                    plan_text += f" {i}. Create file `{file_path}`\n"
+                    plan_display.append(f"Create file ", style="white")
+                    plan_display.append(f"{file_path}", style="cyan")
                 elif action == 'file_edit':
                     file_path = args.get('file_path', 'unknown')
-                    plan_text += f" {i}. Edit file `{file_path}`\n"
+                    plan_display.append(f"Edit file ", style="white")
+                    plan_display.append(f"{file_path}", style="cyan")
                 elif action == 'file_read':
                     file_path = args.get('file_path', 'unknown')
-                    plan_text += f" {i}. Read file `{file_path}`\n"
+                    plan_display.append(f"Read file ", style="white")
+                    plan_display.append(f"{file_path}", style="cyan")
                 elif action == 'shell_exec':
                     command = args.get('command', 'unknown')
-                    plan_text += f" {i}. Execute command `{command}`\n"
+                    plan_display.append(f"Execute ", style="white")
+                    plan_display.append(f"{command}", style="green")
+                elif action == 'ls':
+                    path = args.get('path', 'current directory')
+                    plan_display.append(f"List directory contents of ", style="white")
+                    plan_display.append(f"{path}", style="cyan")
                 else:
-                    plan_text += f" {i}. {action.replace('_', ' ').title()}\n"
+                    # Generic action display
+                    formatted_action = action.replace('_', ' ').title()
+                    plan_display.append(f"{formatted_action}", style="white")
+                    if description:
+                        plan_display.append(f" - {description}", style="dim white")
+                
+                plan_display.append("\n")
             
-            # Display plan in a panel
-            markdown = Markdown(plan_text)
-            panel = Panel(
-                markdown,
-                title="🎯 Execution Plan",
-                title_align="left",
-                border_style="blue",
-                expand=False
-            )
-            
+            # Display plan without panel - minimal style
             console.print("")
-            console.print(panel)
+            console.print("Plan:", style="bold blue")
+            console.print("")
+            console.print(plan_display)
             console.print("")
             
         except Exception:
