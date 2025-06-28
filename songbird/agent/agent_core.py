@@ -104,8 +104,62 @@ class AgentCore:
                         self.plan_manager.set_current_plan(plan)
                         self.current_plan = plan
                         
+                        # Display the plan to the user
+                        await self._display_plan(plan)
+                        
         except Exception as e:
             # If planning fails, continue without a plan
+            pass
+    
+    async def _display_plan(self, plan) -> None:
+        """Display the generated plan to the user."""
+        try:
+            from rich.console import Console
+            from rich.panel import Panel
+            from rich.markdown import Markdown
+            
+            console = Console()
+            
+            # Create plan display
+            plan_text = f"**Goal:** {plan.goal}\n\n"
+            plan_text += "**Plan:**\n\n"
+            
+            for i, step in enumerate(plan.plan, 1):
+                action = step.get('action', 'unknown')
+                args = step.get('args', {})
+                
+                # Format step description
+                if action == 'file_create':
+                    file_path = args.get('file_path', 'unknown')
+                    plan_text += f" {i}. Create file `{file_path}`\n"
+                elif action == 'file_edit':
+                    file_path = args.get('file_path', 'unknown')
+                    plan_text += f" {i}. Edit file `{file_path}`\n"
+                elif action == 'file_read':
+                    file_path = args.get('file_path', 'unknown')
+                    plan_text += f" {i}. Read file `{file_path}`\n"
+                elif action == 'shell_exec':
+                    command = args.get('command', 'unknown')
+                    plan_text += f" {i}. Execute command `{command}`\n"
+                else:
+                    plan_text += f" {i}. {action.replace('_', ' ').title()}\n"
+            
+            # Display plan in a panel
+            markdown = Markdown(plan_text)
+            panel = Panel(
+                markdown,
+                title="🎯 Execution Plan",
+                title_align="left",
+                border_style="blue",
+                expand=False
+            )
+            
+            console.print("")
+            console.print(panel)
+            console.print("")
+            
+        except Exception:
+            # Don't fail if plan display has issues
             pass
     
     async def _agentic_loop(self) -> AgentOutput:
@@ -375,14 +429,16 @@ Remember to follow the plan systematically. Complete the current step before mov
                 elif function_name == "shell_exec":
                     successful_shell_ops += 1
         
-        # If we just successfully created/edited files or ran commands, task might be done
-        # This is a heuristic - for simple requests like "create a file", one successful 
-        # file_create operation often means the task is complete
-        if successful_file_ops > 0 and iteration_count >= 3:
+        # More conservative completion detection to prevent premature termination
+        # Only terminate if we have many iterations with successful operations,
+        # indicating the task is truly complete
+        
+        # For file operations, require more iterations to avoid cutting off multi-file tasks
+        if successful_file_ops > 0 and iteration_count >= 6:
             return True
         
-        # If we successfully ran commands and it's been a few iterations, might be done
-        if successful_shell_ops > 0 and iteration_count >= 5:
+        # For shell operations, be even more conservative since they're often part of larger workflows
+        if successful_shell_ops > 0 and iteration_count >= 8:
             return True
             
         return False

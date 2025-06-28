@@ -326,19 +326,58 @@ def replay_conversation(session: Session):
                         content = arguments.get("content", "")
 
                         console.print(f"\nCreating new file: {file_path}")
-                        # Determine language from file extension
-                        ext = file_path.split(
-                            '.')[-1] if '.' in file_path else 'text'
-                        # Create numbered lines manually to match original formatting
-                        lines = content.split('\n')
-                        numbered_lines = []
-                        for idx, line in enumerate(lines, 1):
-                            numbered_lines.append(f"  {idx:2d} {line}")
-                        formatted_content = '\n'.join(numbered_lines)
-                        console.print(
-                            f"╭─ New file: {file_path} {'─' * (console.width - len(file_path) - 15)}╮")
-                        console.print(formatted_content)
-                        console.print(f"╰{'─' * (console.width - 2)}╯")
+                        
+                        # Use Rich syntax highlighting for proper restoration
+                        from rich.syntax import Syntax
+                        from rich.panel import Panel
+                        from pathlib import Path
+                        
+                        # Get lexer from file extension
+                        path = Path(file_path)
+                        try:
+                            # Lexer mapping for file extensions
+                            lexer_map = {
+                                '.py': 'python', 
+                                '.js': 'javascript', 
+                                '.ts': 'typescript',
+                                '.html': 'html', 
+                                '.css': 'css', 
+                                '.json': 'json',
+                                '.yaml': 'yaml', 
+                                '.yml': 'yaml', 
+                                '.md': 'markdown',
+                                '.sh': 'bash', 
+                                '.c': 'c', 
+                                '.cpp': 'cpp', 
+                                '.java': 'java'
+                            }
+                            
+                            lexer = lexer_map.get(path.suffix, 'text')
+                        except:
+                            lexer = 'text'
+                        
+                        # Create syntax highlighted content
+                        syntax = Syntax(
+                            content,
+                            lexer=lexer,
+                            theme="github-dark",
+                            line_numbers=True,
+                            word_wrap=False
+                        )
+                        
+                        # Create panel to match live session formatting
+                        panel = Panel(
+                            syntax,
+                            title=f"New file: {path.name}",
+                            title_align="left",
+                            border_style="green",
+                            expand=False,
+                            width=min(console.width - 2, 120)
+                        )
+                        
+                        console.print("")
+                        console.print(panel)
+                        console.print("")
 
                     elif function_name == "file_edit" and tool_result:
                         file_path = tool_result.get(
