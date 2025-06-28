@@ -5,6 +5,7 @@ Tool execution system for handling LLM function calls.
 import asyncio
 from typing import Dict, Any, List
 from .tool_registry import get_tool_function, get_tool_schemas
+from ..config.config_manager import get_config
 
 
 class ToolExecutor:
@@ -33,6 +34,9 @@ class ToolExecutor:
                     "error": f"Unknown tool: {tool_name}"
                 }
             
+            # Get configuration for timeout injection
+            config = get_config()
+            
             # Add working directory to file search if not specified
             if tool_name == "file_search" and "directory" not in arguments:
                 arguments["directory"] = self.working_directory
@@ -41,6 +45,10 @@ class ToolExecutor:
             if tool_name in ["todo_read", "todo_write"] and "session_id" not in arguments:
                 if self.session_id:
                     arguments["session_id"] = self.session_id
+            
+            # Inject configuration-based timeouts if not specified
+            if tool_name == "shell_exec" and "timeout" not in arguments:
+                arguments["timeout"] = config.tools.shell_timeout
                 
             # Execute the tool function
             result = await tool_function(**arguments)
