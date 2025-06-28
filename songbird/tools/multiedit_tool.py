@@ -253,7 +253,7 @@ def _display_single_edit_preview(preview: Dict[str, Any]):
     
     # Operation-specific display
     if operation == "create":
-        console.print(f"\n[bold green]📄 CREATE:[/bold green] {file_path}")
+        console.print(f"\n[bold green]CREATE:[/bold green] {file_path}")
         console.print(f"[dim]Lines to add: {preview['lines_added']}[/dim]")
         
         # Show content preview
@@ -279,13 +279,13 @@ def _display_single_edit_preview(preview: Dict[str, Any]):
         console.print(panel)
         
     elif operation == "delete":
-        console.print(f"\n[bold red]🗑️  DELETE:[/bold red] {file_path}")
+        console.print(f"\n[bold red] DELETE:[/bold red] {file_path}")
         console.print(f"[dim]Lines to remove: {preview['lines_removed']}[/dim]")
         
-        console.print("[yellow]⚠️  This file will be permanently deleted![/yellow]")
+        console.print("[yellow]This file will be permanently deleted![/yellow]")
         
     elif operation == "edit":
-        console.print(f"\n[bold blue]✏️  EDIT:[/bold blue] {file_path}")
+        console.print(f"\n[bold blue]EDIT:[/bold blue] {file_path}")
         
         if not preview["has_changes"]:
             console.print("[dim]No changes detected[/dim]")
@@ -401,7 +401,7 @@ async def _apply_edits_atomic(edits: List[Dict[str, Any]], create_backup: bool) 
             except Exception:
                 pass
         
-        console.print(f"[bold green]✅ Successfully applied {len(edits)} changes[/bold green]")
+        console.print(f"[bold green]Successfully applied {len(edits)} changes[/bold green]")
         
         return {
             "success": True,
@@ -412,7 +412,7 @@ async def _apply_edits_atomic(edits: List[Dict[str, Any]], create_backup: bool) 
         }
         
     except Exception as e:
-        console.print(f"[bold red]❌ Atomic operation failed: {e}[/bold red]")
+        console.print(f"[bold red]Atomic operation failed: {e}[/bold red]")
         
         return {
             "success": False,
@@ -463,23 +463,23 @@ async def _apply_edits_sequential(edits: List[Dict[str, Any]], create_backup: bo
                 
                 applied_edits.append(f"Edited {file_path}")
             
-            console.print(f"[green]✅ {operation.title()}d {file_path.name}[/green]")
+            console.print(f"[green]{operation.title()}d {file_path.name}[/green]")
             
         except Exception as e:
             error_msg = f"Failed {operation} on {file_path}: {e}"
             failed_edits.append(error_msg)
-            console.print(f"[red]❌ {error_msg}[/red]")
+            console.print(f"[red]{error_msg}[/red]")
     
     # Summary
     success_count = len(applied_edits)
     failure_count = len(failed_edits)
     
     if failure_count == 0:
-        console.print(f"[bold green]✅ Successfully applied all {success_count} changes[/bold green]")
+        console.print(f"[bold green]Successfully applied all {success_count} changes[/bold green]")
         success = True
         message = f"Successfully applied all {success_count} changes"
     else:
-        console.print(f"[bold yellow]⚠️  Applied {success_count} changes, {failure_count} failed[/bold yellow]")
+        console.print(f"[bold yellow]Applied {success_count} changes, {failure_count} failed[/bold yellow]")
         success = False
         message = f"Applied {success_count} changes, {failure_count} failed"
     
@@ -496,7 +496,7 @@ async def _apply_edits_sequential(edits: List[Dict[str, Any]], create_backup: bo
 async def _rollback_atomic_operation(temp_files: Dict[str, str], backup_files: Dict[str, str], applied_edits: List[str]):
     """Rollback a failed atomic operation."""
     
-    console.print("\n[yellow]🔄 Rolling back failed atomic operation...[/yellow]")
+    console.print("\n[yellow]Rolling back failed atomic operation...[/yellow]")
     
     # Remove any temp files
     for temp_path in temp_files.values():

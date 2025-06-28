@@ -5,6 +5,7 @@ Simplified model switching command with clean display.
 
 from typing import Dict, Any, List
 from .base import BaseCommand, CommandResult
+import os
 
 
 class ModelCommand(BaseCommand):
@@ -22,6 +23,7 @@ class ModelCommand(BaseCommand):
         provider_name = context.get("provider", "")
         current_model = context.get("model", "")
         provider_instance = context.get("provider_instance")
+        orchestrator = context.get("orchestrator")
 
         if not provider_name:
             return CommandResult(
@@ -29,30 +31,97 @@ class ModelCommand(BaseCommand):
                 message="No provider available in current context"
             )
 
-        # Get available models
-        models = self._get_available_models(provider_name)
+        # Check provider prerequisites first
+        is_ready, error_msg = self._check_provider_prerequisites(provider_name)
+        if not is_ready:
+            return CommandResult(
+                success=False,
+                message=error_msg
+            )
+        
+        # Get available models - all providers use LiteLLM except Copilot
+        if provider_name == "copilot":
+            models = self._get_copilot_models()
+        else:
+            models = self._get_litellm_models(provider_name)
+            
         if not models:
             return CommandResult(
                 success=False,
                 message=f"No models available for provider: {provider_name}"
             )
 
-        # If args provided, try to set model directly
+        # If args provided, try to set model directly or handle special commands
         if args.strip():
-            new_model = args.strip()
-            if new_model in models:
-                if provider_instance:
-                    provider_instance.model = new_model
-                return CommandResult(
-                    success=True,
-                    message=f"Switched to model: {new_model}",
-                    data={"new_model": new_model}
-                )
+            arg = args.strip()
+            
+            # Handle cache invalidation command
+            if arg == "--refresh" or arg == "--reload":
+                try:
+                    from ..llm.providers import invalidate_model_cache
+                    invalidate_model_cache(provider_name)
+                    return CommandResult(
+                        success=True,
+                        message=f"Model cache refreshed for {provider_name}"
+                    )
+                except Exception as e:
+                    return CommandResult(
+                        success=False,
+                        message=f"Failed to refresh cache: {e}"
+                    )
+            
+            new_model = arg
+            
+            # Handle model switching based on provider type
+            if provider_name == "copilot":
+                # Copilot uses custom provider - direct model assignment
+                if new_model in models:
+                    if provider_instance:
+                        provider_instance.model = new_model
+                        # Update session if available 
+                        if orchestrator and orchestrator.session:
+                            orchestrator.session.update_provider_config(
+                                provider_name, new_model, provider_type="custom"
+                            )
+                            orchestrator.session_manager.save_session(orchestrator.session)
+                    return CommandResult(
+                        success=True,
+                        message=None,  # CLI will handle the confirmation
+                        data={"new_model": new_model}
+                    )
+                else:
+                    return CommandResult(
+                        success=False,
+                        message=f"Model '{new_model}' not available for Copilot. Use /model to see available models."
+                    )
             else:
-                return CommandResult(
-                    success=False,
-                    message=f"Model '{new_model}' not available. Use /model to see available models."
-                )
+                # All other providers use LiteLLM
+                resolved_model = self._resolve_litellm_model(provider_name, new_model)
+                if resolved_model and self._is_valid_litellm_model(provider_name, new_model):
+                    if provider_instance:
+                        # Use set_model if available (LiteLLM adapter) for proper state flush
+                        if hasattr(provider_instance, 'set_model'):
+                            provider_instance.set_model(resolved_model)
+                        else:
+                            provider_instance.model = resolved_model
+                        # Update session if available 
+                        if orchestrator and orchestrator.session:
+                            orchestrator.session.update_litellm_config(
+                                provider=provider_name,
+                                model=new_model,
+                                litellm_model=resolved_model
+                            )
+                            orchestrator.session_manager.save_session(orchestrator.session)
+                    return CommandResult(
+                        success=True,
+                        message=None,  # CLI will handle the confirmation
+                        data={"new_model": new_model}
+                    )
+                else:
+                    return CommandResult(
+                        success=False,
+                        message=f"Model '{new_model}' not available for LiteLLM provider '{provider_name}'. Use /model to see available models."
+                    )
 
         # Show current model info
         self.console.print(
@@ -97,24 +166,126 @@ class ModelCommand(BaseCommand):
                 message=f"Model unchanged: {selected_model}"
             )
 
-        # Update the model
-        if provider_instance:
-            provider_instance.model = selected_model
+        # Update the model based on provider type
+        if provider_name == "copilot":
+            # Copilot uses custom provider - direct model assignment
+            if provider_instance:
+                provider_instance.model = selected_model
+                # Update session if available
+                if orchestrator and orchestrator.session:
+                    orchestrator.session.update_provider_config(
+                        provider_name, selected_model, provider_type="custom")
+                    orchestrator.session_manager.save_session(orchestrator.session)
 
-        return CommandResult(
-            success=True,
-            message=f"Switched to model: {selected_model}",
-            data={"new_model": selected_model}
-        )
+            return CommandResult(
+                success=True,
+                message=None,  # CLI will handle the confirmation
+                data={"new_model": selected_model}
+            )
+        else:
+            # All other providers use LiteLLM
+            resolved_model = self._resolve_litellm_model(provider_name, selected_model)
+            if provider_instance and resolved_model:
+                # Use set_model if available (LiteLLM adapter) for proper state flush
+                if hasattr(provider_instance, 'set_model'):
+                    provider_instance.set_model(resolved_model)
+                else:
+                    provider_instance.model = resolved_model
+                # Update session if available
+                if orchestrator and orchestrator.session:
+                    orchestrator.session.update_litellm_config(
+                        provider=provider_name,
+                        model=selected_model,
+                        litellm_model=resolved_model
+                    )
+                    orchestrator.session_manager.save_session(orchestrator.session)
+            
+            return CommandResult(
+                success=True,
+                message=None,  # CLI will handle the confirmation
+                data={"new_model": selected_model}
+            )
+
+    def _run_async_discovery(self, provider_name: str) -> List[str]:
+        """Run async model discovery in a clean event loop context."""
+        import asyncio
+        from ..llm.providers import get_models_for_provider
+        
+        async def discover():
+            return await asyncio.wait_for(
+                get_models_for_provider(provider_name, use_cache=True), 
+                timeout=5.0
+            )
+        
+        # Run in a new event loop to avoid conflicts
+        return asyncio.run(discover())
 
     def _get_available_models(self, provider_name: str) -> List[str]:
-        """Get available models for a provider."""
+        """Get available models for a provider using dynamic discovery.
+        
+        Note: This method is now redundant with _get_litellm_models since all providers
+        except Copilot use LiteLLM. Kept for backward compatibility.
+        """
+        # Special handling for Copilot since it's a custom provider
+        if provider_name == "copilot":
+            return self._get_copilot_models()
+        
+        try:
+            # Try dynamic discovery first for LiteLLM providers
+            from ..llm.providers import get_models_for_provider
+            import asyncio
+            import concurrent.futures
+            
+            # Event loop compatible async handling
+            try:
+                # Use ThreadPoolExecutor to run async code from sync context
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(self._run_async_discovery, provider_name)
+                    discovered_models = future.result(timeout=8.0)  # Slightly longer timeout for thread overhead
+                    if discovered_models:
+                        return discovered_models
+            except concurrent.futures.TimeoutError:
+                self.console.print(f"[yellow]Model discovery timeout for {provider_name} - using fallback[/yellow]")
+            except Exception as e:
+                if "ollama" in provider_name.lower():
+                    self.console.print(f"[yellow]Ollama not running or no models found - using fallback[/yellow]")
+                else:
+                    self.console.print(f"[yellow]Discovery failed for {provider_name}: {e} - using fallback[/yellow]")
+            
+        except Exception as e:
+            self.console.print(f"[yellow]Discovery setup failed for {provider_name}: {e}[/yellow]")
+        
+        # Check prerequisites before fallback
+        is_ready, _ = self._check_provider_prerequisites(provider_name)
+        if not is_ready:
+            return []  # Prerequisites not met, don't show fallback models
+        
+        # Fallback methods with prerequisite validation
         if provider_name == "ollama":
-            return self._get_ollama_models()
+            # For Ollama, try a quick sync check if async discovery failed
+            try:
+                import requests
+                response = requests.get("http://localhost:11434/api/tags", timeout=2)
+                if response.status_code == 200:
+                    models = response.json().get('models', [])
+                    if models:
+                        self.console.print(f"[dim]Found {len(models)} Ollama models via HTTP fallback[/dim]")
+                        return [model['name'] for model in models]
+            except Exception:
+                pass
+            
+            # Return static fallback for Ollama (only if service is running)
+            return [
+                "qwen2.5-coder:7b",
+                "qwen2.5-coder:14b", 
+                "llama3.2:latest",
+                "codellama:latest",
+                "deepseek-coder:6.7b"
+            ]
         elif provider_name == "gemini":
             return [
-                "gemini-2.0-flash-001",
-                "gemini-1.5-pro",
+                "gemini-2.0-flash",
+                "gemini-1.5-pro", 
                 "gemini-1.5-flash",
                 "gemini-1.0-pro"
             ]
@@ -133,42 +304,14 @@ class ModelCommand(BaseCommand):
         else:
             return []
 
-    def _get_ollama_models(self) -> List[str]:
-        """Get available Ollama models."""
-        try:
-            import requests
-            response = requests.get(
-                "http://localhost:11434/api/tags", timeout=2)
-            if response.status_code == 200:
-                models = response.json().get('models', [])
-                return [model['name'] for model in models]
-        except Exception:
-            pass
-
-        # Fallback to common models
-        return [
-            "qwen2.5-coder:7b",
-            "qwen2.5-coder:14b", 
-            "qwen2.5-coder:32b",
-            "llama3.2:latest",
-            "codellama:latest",
-            "deepseek-coder:6.7b"
-        ]
 
     def _get_openai_models(self) -> List[str]:
         """Get available OpenAI models dynamically."""
         try:
-            import os
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
-                # Return fallback models if no API key
-                return [
-                    "gpt-4o",
-                    "gpt-4o-mini", 
-                    "gpt-4-turbo",
-                    "gpt-4",
-                    "gpt-3.5-turbo"
-                ]
+                # Prerequisites not met - return empty list
+                return []
             
             import openai
             client = openai.OpenAI(api_key=api_key)
@@ -207,19 +350,12 @@ class ModelCommand(BaseCommand):
     def _get_openrouter_models(self) -> List[str]:
         """Get available OpenRouter models that support tools from API."""
         try:
-            import os
             import httpx
             
             api_key = os.getenv("OPENROUTER_API_KEY")
             if not api_key:
-                # Return fallback models if no API key - known tool-capable models
-                return [
-                    "deepseek/deepseek-chat-v3-0324:free",
-                    "anthropic/claude-3.5-sonnet",
-                    "openai/gpt-4o",
-                    "openai/gpt-4o-mini",
-                    "google/gemini-2.0-flash-001"
-                ]
+                # Prerequisites not met - return empty list
+                return []
             
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -267,13 +403,13 @@ class ModelCommand(BaseCommand):
                 if tool_capable_models:
                     return tool_capable_models
                 else:
-                    print("No tool-capable models found in OpenRouter API")
+                    self.console.print("[yellow]No tool-capable models found in OpenRouter API[/yellow]")
                     
             else:
-                print(f"OpenRouter API error: {response.status_code}")
+                self.console.print(f"[yellow]OpenRouter API error: {response.status_code}[/yellow]")
                 
         except Exception as e:
-            print(f"Error fetching OpenRouter models: {e}")
+            self.console.print(f"[yellow]Error fetching OpenRouter models: {e}[/yellow]")
         
         # Return fallback models on any error - known tool-capable models
         return [
@@ -284,22 +420,262 @@ class ModelCommand(BaseCommand):
             "google/gemini-2.0-flash-001"
         ]
 
+    # Note: _is_litellm_provider method removed - all providers except Copilot use LiteLLM
+    
+    def _check_provider_prerequisites(self, provider_name: str) -> tuple[bool, str]:
+        """
+        Check if provider prerequisites are met (API keys, services running).
+        
+        Returns:
+            tuple: (is_ready, error_message)
+        """
+        if provider_name == "openai":
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                return False, "OPENAI_API_KEY environment variable not set\n\n Get your API key from: https://platform.openai.com/api-keys\n Set it with: export OPENAI_API_KEY='your-key-here'"
+                
+        elif provider_name == "claude":
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                return False, "ANTHROPIC_API_KEY environment variable not set\n\n Get your API key from: https://console.anthropic.com/account/keys\n Set it with: export ANTHROPIC_API_KEY='your-key-here'"
+                
+        elif provider_name == "gemini":
+            api_key = os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                return False, "GEMINI_API_KEY environment variable not set\n\n Get your FREE API key from: https://aistudio.google.com/app/apikey\n Set it with: export GEMINI_API_KEY='your-key-here'"
+                
+        elif provider_name == "openrouter":
+            api_key = os.getenv("OPENROUTER_API_KEY")
+            if not api_key:
+                return False, "OPENROUTER_API_KEY environment variable not set\n\n Get your API key from: https://openrouter.ai/keys\n Set it with: export OPENROUTER_API_KEY='your-key-here'"
+                
+        elif provider_name == "ollama":
+            # Check if Ollama service is running
+            try:
+                import requests
+                response = requests.get("http://localhost:11434/api/version", timeout=2)
+                if response.status_code != 200:
+                    return False, "Ollama service not responding\n\n🚀 Start Ollama with: ollama serve\n📚 Install from: https://ollama.ai"
+            except Exception:
+                return False, "Ollama not running or not installed\n\n🚀 Start Ollama with: ollama serve\n📚 Install from: https://ollama.ai"
+                
+        elif provider_name == "copilot":
+            token = os.getenv("COPILOT_ACCESS_TOKEN")
+            if not token:
+                return False, "COPILOT_ACCESS_TOKEN environment variable not set\n\n Get your token from GitHub Copilot settings\n Set it with: export COPILOT_ACCESS_TOKEN='your-token-here'"
+        
+        return True, ""
+    
+    def _get_litellm_models(self, provider_name: str) -> List[str]:
+        """Get available models for LiteLLM provider using dynamic discovery."""
+        # Special handling for Copilot since it uses a custom provider
+        if provider_name == "copilot":
+            return self._get_copilot_models()
+        
+        try:
+            # Try dynamic discovery first
+            from ..llm.providers import get_models_for_provider
+            import asyncio
+            import concurrent.futures
+            
+            # Event loop compatible async handling
+            try:
+                # Use ThreadPoolExecutor to run async code from sync context
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(self._run_async_discovery, provider_name)
+                    discovered_models = future.result(timeout=8.0)  # Slightly longer timeout for thread overhead
+                    if discovered_models:
+                        return discovered_models
+            except concurrent.futures.TimeoutError:
+                self.console.print(f"[yellow]Model discovery timeout for {provider_name} - using fallback[/yellow]")
+            except Exception as e:
+                if "ollama" in provider_name.lower():
+                    self.console.print(f"[yellow]Ollama not running or no models found - using fallback[/yellow]")
+                else:
+                    self.console.print(f"[yellow]Discovery failed for {provider_name}: {e} - using fallback[/yellow]")
+            
+            # Fallback to configuration-based models
+            from ..config import load_provider_mapping
+            config = load_provider_mapping()
+            
+            models = []
+            
+            # Add default model
+            default_model = config.get_default_model(provider_name)
+            if default_model:
+                # Extract the model name part after the provider prefix
+                if "/" in default_model:
+                    model_name = default_model.split("/", 1)[1]
+                    models.append(model_name)
+            
+            # Add all mapped models for this provider
+            available_models = config.get_available_models(provider_name)
+            for model_name in available_models:
+                if model_name not in models:
+                    models.append(model_name)
+            
+            # Check prerequisites before showing fallback models
+            is_ready, _ = self._check_provider_prerequisites(provider_name)
+            if not models and is_ready:
+                models = self._get_fallback_litellm_models(provider_name)
+            elif not is_ready:
+                return []  # Prerequisites not met
+            
+            return models
+            
+        except Exception as e:
+            self.console.print(f"[yellow]Warning: Failed to load models: {e}[/yellow]")
+            return self._get_fallback_litellm_models(provider_name)
+    
+    def _get_fallback_litellm_models(self, provider_name: str) -> List[str]:
+        """Get fallback models for LiteLLM provider."""
+        fallback_models = {
+            "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
+            "claude": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+            "gemini": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-exp"],
+            "ollama": ["qwen2.5-coder:7b", "llama3.2:latest", "codellama:latest"],
+            "openrouter": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o", "deepseek/deepseek-chat-v3-0324:free"],
+            "copilot": ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
+        }
+        return fallback_models.get(provider_name, [])
+    
+    def _get_copilot_models(self) -> List[str]:
+        """Get available GitHub Copilot models using the custom provider with API discovery."""
+        try:
+            from ..llm.providers import get_copilot_provider
+            import asyncio
+            
+            provider = get_copilot_provider(quiet=True)
+            
+            # Use async model discovery to get the full list from API
+            def run_async_discovery():
+                try:
+                    # Check if we're already in an event loop
+                    try:
+                        loop = asyncio.get_running_loop()
+                        # We're in an event loop, use ThreadPoolExecutor
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(asyncio.run, provider.get_models())
+                            models_data = future.result(timeout=10)
+                            # Extract model IDs from the API response
+                            return [model.get("id", "") for model in models_data if model.get("id")]
+                    except RuntimeError:
+                        # No event loop running, safe to create one
+                        models_data = asyncio.run(provider.get_models())
+                        # Extract model IDs from the API response
+                        return [model.get("id", "") for model in models_data if model.get("id")]
+                except Exception as discovery_error:
+                    # Provide more specific error information for Copilot
+                    if "Cannot run the event loop while another loop is running" in str(discovery_error):
+                        self.console.print(f"[yellow]API discovery failed: Event loop conflict - using fallback models[/yellow]")
+                    elif "timeout" in str(discovery_error).lower():
+                        self.console.print(f"[yellow]API discovery failed: Network timeout - using fallback models[/yellow]")
+                    elif "401" in str(discovery_error) or "403" in str(discovery_error):
+                        self.console.print(f"[yellow]API discovery failed: Authentication error - check COPILOT_ACCESS_TOKEN[/yellow]")
+                    else:
+                        self.console.print(f"[yellow]API discovery failed: {discovery_error}[/yellow]")
+                    # Fall back to static available models (sync method)
+                    try:
+                        return provider.get_available_models()
+                    except Exception:
+                        return ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
+            
+            discovered_models = run_async_discovery()
+            
+            if discovered_models:
+                self.console.print(f"[dim]Found {len(discovered_models)} Copilot models via API discovery[/dim]")
+                return discovered_models
+            else:
+                # Ultimate fallback
+                return ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
+                
+        except Exception as e:
+            self.console.print(f"[yellow]Could not get Copilot models: {e}[/yellow]")
+            # Return fallback models
+            return ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
+    
+    def _resolve_litellm_model(self, provider_name: str, model_name: str) -> str:
+        """Resolve a model name to LiteLLM model string with fallback warnings."""
+        # Special handling for Copilot since it uses a custom provider
+        if provider_name == "copilot":
+            return model_name  # Copilot uses model names directly, not LiteLLM format
+        
+        try:
+            from ..config import load_provider_mapping
+            config = load_provider_mapping()
+            
+            # Try to resolve through configuration
+            try:
+                resolved = config.resolve_model_string(provider_name, model_name)
+                if resolved:
+                    return resolved
+            except ValueError:
+                # Config doesn't have this model, continue to fallback
+                pass
+            
+            # Check if model is in our known models list
+            available_models = self._get_litellm_models(provider_name)
+            if model_name not in available_models:
+                self.console.print(f"[yellow]⚠️  Unknown model '{model_name}' for provider '{provider_name}'[/yellow]")
+                self.console.print(f"[yellow]   Available models: {', '.join(available_models[:3])}{'...' if len(available_models) > 3 else ''}[/yellow]")
+                self.console.print(f"[yellow]   Attempting to use model anyway with LiteLLM...[/yellow]")
+            
+            # Fallback: construct model string with warning
+            constructed = f"{provider_name}/{model_name}"
+            if model_name not in available_models:
+                self.console.print(f"[dim]   Using constructed model string: {constructed}[/dim]")
+            
+            return constructed
+            
+        except Exception as e:
+            # Final fallback with error message
+            self.console.print(f"[red]Error resolving model '{model_name}' for provider '{provider_name}': {e}[/red]")
+            fallback = f"{provider_name}/{model_name}"
+            self.console.print(f"[yellow]Using fallback model string: {fallback}[/yellow]")
+            return fallback
+    
+    def _is_valid_litellm_model(self, provider_name: str, model_name: str) -> bool:
+        """Check if a model is valid for the LiteLLM provider with fallback support."""
+        try:
+            available_models = self._get_litellm_models(provider_name)
+            
+            # Allow exact matches from our configuration
+            if model_name in available_models:
+                return True
+            
+            # Allow unknown models with a warning (LiteLLM might support it)
+            self.console.print(f"[dim]Model '{model_name}' not in known list, allowing fallback attempt[/dim]")
+            return True
+            
+        except Exception:
+            # If we can't load models, allow the attempt anyway
+            return True
+
     def get_help(self) -> str:
         """Get detailed help for the model command."""
         return """
 [bold]Usage:[/bold]
   /model              - Show interactive model selection menu
   /model <name>       - Switch to specific model directly
+  /model --refresh    - Refresh model cache and show updated models
+  /model --reload     - Same as --refresh
 
 [bold]Examples:[/bold]
   /model              - Opens interactive menu with arrow key navigation
   /model gemini-2.0-flash-exp     - Switch to Gemini 2.0 Flash
   /model qwen2.5-coder:7b         - Switch to Qwen 2.5 Coder
+  /model --refresh    - Reload available models from provider APIs
 
 [bold]Interactive Menu:[/bold]
   • Use ↑↓ arrow keys to navigate
   • Press Enter to select
   • Press Ctrl+C to cancel
+
+[bold]Model Discovery:[/bold]
+  • Models are automatically discovered from provider APIs
+  • Results are cached for 5 minutes for performance
+  • Use --refresh to force reload from APIs
 
 [bold]Shortcuts:[/bold]
   /m                  - Same as /model

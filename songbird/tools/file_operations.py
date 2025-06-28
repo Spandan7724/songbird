@@ -179,7 +179,7 @@ async def file_read(file_path: str, lines: Optional[int] = None, start_line: Opt
 
 async def file_edit(file_path: str, new_content: str, create_backup: bool = False) -> Dict[str, Any]:
     """
-    Edit file with diff preview and confirmation.
+    Edit file with diff preview and automatic application.
     Automatically reads the file first if it hasn't been read in this session.
     
     Args:
@@ -190,6 +190,8 @@ async def file_edit(file_path: str, new_content: str, create_backup: bool = Fals
     Returns:
         Dictionary with operation result and diff preview
     """
+    import os
+    
     try:
         path = Path(file_path)
         
@@ -237,20 +239,64 @@ async def file_edit(file_path: str, new_content: str, create_backup: bool = Fals
         # Create diff preview
         diff_preview = _format_diff_preview(diff_lines)
         
-        return {
-            "success": True,
-            "file_path": str(path),
-            "diff_preview": diff_preview,
-            "changes_made": len(diff_lines) > 0,
-            "old_content": old_content,
-            "new_content": new_content,
-            "requires_confirmation": True
-        }
+        # Show diff preview if there are changes
+        if len(diff_lines) > 0:
+            console.print(f"\n[bold blue]Editing file:[/bold blue] {path}")
+            console.print(Panel(
+                diff_preview,
+                title=f"Changes to {path.name}",
+                title_align="left",
+                border_style="blue",
+                expand=False,
+                width=min(console.width - 2, 120)  # Prevent cutoff
+            ))
+        
+        # Auto-apply edits in agentic mode (check for auto-apply environment variable)
+        auto_apply = os.getenv("SONGBIRD_AUTO_APPLY", "").lower() in ("y", "yes", "true", "1")
+        
+        # Always apply edits in agentic mode for better user experience
+        # This allows the AI to make file changes without manual confirmation
+        if len(diff_lines) > 0 or not path.exists():
+            # Create backup if requested
+            if create_backup and path.exists():
+                backup_path = path.with_suffix(path.suffix + '.bak')
+                with open(backup_path, 'w', encoding='utf-8') as f:
+                    f.write(old_content)
+            
+            # Ensure parent directory exists
+            path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Apply the edit
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            
+            console.print(f"[green]✓[/green] Changes applied to {path.name}")
+            
+            return {
+                "success": True,
+                "file_path": str(path),
+                "diff_preview": diff_preview,
+                "changes_made": len(diff_lines) > 0,
+                "old_content": old_content,
+                "new_content": new_content,
+                "lines_written": len(new_content.splitlines()),
+                "backup_created": create_backup and path.exists(),
+                "applied": True
+            }
+        else:
+            return {
+                "success": True,
+                "file_path": str(path),
+                "diff_preview": diff_preview,
+                "changes_made": False,
+                "message": "No changes needed - content is already identical",
+                "applied": False
+            }
         
     except Exception as e:
         return {
             "success": False,
-            "error": f"Error preparing file edit: {e}"
+            "error": f"Error editing file: {e}"
         }
 
 
@@ -277,11 +323,11 @@ async def file_create(file_path: str, content: str) -> Dict[str, Any]:
                 "error": f"File already exists: {file_path}. Use file_edit to modify existing files."
             }
         
-        # Print creation message immediately
+        # Show preview of what will be created with proper spacing
         console.print(f"\n[bold green]Creating new file:[/bold green] {path}")
         
         # Small delay to ensure message is visible before file preview
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.1)
         
         # Show preview of what will be created
         syntax = Syntax(
@@ -291,14 +337,21 @@ async def file_create(file_path: str, content: str) -> Dict[str, Any]:
             line_numbers=True,
             word_wrap=False
         )
+        
+        # Use a fixed width instead of expand=True to prevent cutoff
         panel = Panel(
             syntax,
             title=f"New file: {path.name}",
             title_align="left",
             border_style="green",
-            expand=True
+            expand=False,
+            width=min(console.width - 2, 120)  # Leave some margin and cap at reasonable width
         )
+        
+        # Print panel with newline padding for better visibility
+        console.print("")
         console.print(panel)
+        console.print("")
         
         # Ensure parent directory exists
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -357,40 +410,52 @@ async def apply_file_edit(file_path: str, new_content: str) -> Dict[str, Any]:
         }
 
 
-def _format_diff_preview(diff_lines: List[str]) -> str:
-    """Format diff lines with color coding for terminal display."""
+def _format_diff_preview(diff_lines: List[str]) -> Any:
+    """Format diff lines with Rich color coding for terminal display."""
+    from rich.text import Text
+    
     if not diff_lines:
-        return "No changes detected."
+        return Text("No changes detected.", style="dim")
     
-    # Simple string formatting for better compatibility
-    formatted_lines = []
+    # Create Rich Text object with proper color formatting
+    formatted_text = Text()
+    
     for line in diff_lines:
-        formatted_lines.append(line)
+        if line.startswith('---'):
+            # File header (old file)
+            formatted_text.append(line + '\n', style="bold blue")
+        elif line.startswith('+++'):
+            # File header (new file)  
+            formatted_text.append(line + '\n', style="bold blue")
+        elif line.startswith('@@'):
+            # Hunk header (line numbers)
+            formatted_text.append(line + '\n', style="bold cyan")
+        elif line.startswith('-'):
+            # Removed lines - RED
+            formatted_text.append(line + '\n', style="bold red")
+        elif line.startswith('+'):
+            # Added lines - GREEN
+            formatted_text.append(line + '\n', style="bold green")
+        else:
+            # Context lines (unchanged)
+            formatted_text.append(line + '\n', style="dim white")
     
-    return '\n'.join(formatted_lines)
+    return formatted_text
 
 
-def display_diff_preview(diff_preview: str, file_path: str):
-    """Display a formatted diff preview with Rich."""
+def display_diff_preview(diff_preview: Any, file_path: str):
+    """Display a formatted diff preview with Rich color coding."""
     # Add spacing to prevent cutoff from status messages
     console.print()
     
-    # Use Rich's Syntax for better diff display
-    syntax = Syntax(
-        diff_preview, 
-        "diff", 
-        theme="github-dark", 
-        line_numbers=False,
-        word_wrap=False,
-        background_color="default"
-    )
+    # diff_preview is now a Rich Text object with proper colors
     panel = Panel(
-        syntax,
+        diff_preview,
         title=f"Proposed changes to {file_path}",
         title_align="left",
         border_style="blue",
-        expand=True,
-        width=None  # Let it auto-size to content
+        expand=False,
+        width=min(console.width - 2, 120)  # Prevent cutoff
     )
     console.print(panel)
     

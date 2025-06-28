@@ -4,7 +4,7 @@ Tool execution system for handling LLM function calls.
 """
 import asyncio
 from typing import Dict, Any, List
-from .registry import get_tool_function, get_tool_schemas
+from .tool_registry import get_tool_function, get_tool_schemas
 
 
 class ToolExecutor:

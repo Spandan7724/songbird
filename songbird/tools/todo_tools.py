@@ -304,27 +304,15 @@ async def llm_auto_complete_todos(message: str, session_id: Optional[str] = None
         
         todos_json = "{\n  " + ",\n  ".join(todos_list) + "\n}"
         
-        prompt = f"""Analyze this user message to determine which todos were completed:
-
-User message: "{message}"
-
-Current todos:
-{todos_json}
-
-Task: Identify which todo IDs were completed/finished based on the user's message.
-
-Rules:
-- Look for completion indicators: "finished", "completed", "done", "implemented", "fixed", "working", etc.
-- Match todo content semantically (e.g., "JWT token system" matches "JWT tokens")  
-- Only return IDs of todos that were clearly completed
-- If no todos were completed, return empty array
-
-Return ONLY a JSON array of completed todo IDs:
-["id1", "id2"]"""
+        # Use centralized prompt template
+        from ..prompts import get_todo_completion_prompt_template
+        prompt_template = get_todo_completion_prompt_template()
+        prompt = prompt_template.format(message=message, todos_json=todos_json)
 
         try:
             # Use the LLM to analyze the message
-            response = llm_provider.chat(prompt)
+            messages = [{"role": "user", "content": prompt}]
+            response = await llm_provider.chat_with_messages(messages)
             response_text = response.content.strip()
             
             # Extract JSON from response (handle potential markdown formatting)
@@ -387,24 +375,18 @@ async def fallback_auto_complete_todos(message: str, session_id: Optional[str] =
     return completed_ids
 
 
-def auto_complete_todos_from_message(message: str, session_id: Optional[str] = None, llm_provider=None) -> List[str]:
+async def auto_complete_todos_from_message(message: str, session_id: Optional[str] = None, llm_provider=None) -> List[str]:
     """
-    Compatibility wrapper for the LLM-based auto-completion.
+    Async LLM-based auto-completion with fallback.
     Returns list of completed todo IDs.
     """
-    import asyncio
-    
-    # Run the async LLM-based completion
+    # Try LLM-based completion first
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If we're already in an async context, create a task
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, llm_auto_complete_todos(message, session_id, llm_provider))
-                return future.result()
-        else:
-            return asyncio.run(llm_auto_complete_todos(message, session_id, llm_provider))
+        return await llm_auto_complete_todos(message, session_id, llm_provider)
     except Exception:
-        # If async fails, use the fallback
-        return asyncio.run(fallback_auto_complete_todos(message, session_id))
+        # If LLM-based completion fails, use the simple fallback
+        try:
+            return await fallback_auto_complete_todos(message, session_id)
+        except Exception:
+            # If everything fails, return empty list
+            return []

@@ -15,6 +15,7 @@ class Message:
     timestamp: datetime = field(default_factory=datetime.now)
     tool_calls: Optional[List[Dict[str, Any]]] = None
     tool_call_id: Optional[str] = None
+    name: Optional[str] = None  # For tool messages
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert message to dictionary for storage."""
@@ -27,6 +28,8 @@ class Message:
             data["tool_calls"] = self.tool_calls
         if self.tool_call_id:
             data["tool_call_id"] = self.tool_call_id
+        if self.name:
+            data["name"] = self.name
         return data
 
     @classmethod
@@ -38,7 +41,8 @@ class Message:
             content=data["content"],
             timestamp=timestamp,
             tool_calls=data.get("tool_calls"),
-            tool_call_id=data.get("tool_call_id")
+            tool_call_id=data.get("tool_call_id"),
+            name=data.get("name")
         )
 
 
@@ -53,6 +57,7 @@ class Session:
     project_path: str = ""
     # Add provider configuration
     provider_config: Dict[str, Any] = field(default_factory=dict)
+    schema_version: str = "1.0"  # Version for serialization compatibility
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert session to dictionary for storage."""
@@ -63,7 +68,8 @@ class Session:
             "messages": [msg.to_dict() for msg in self.messages],
             "summary": self.summary,
             "project_path": self.project_path,
-            "provider_config": self.provider_config  # Save provider config
+            "provider_config": self.provider_config,  # Save provider config
+            "schema_version": self.schema_version  # Include schema version
         }
 
     @classmethod
@@ -78,7 +84,8 @@ class Session:
             summary=data.get("summary", ""),
             project_path=data.get("project_path", ""),
             # Load provider config
-            provider_config=data.get("provider_config", {})
+            provider_config=data.get("provider_config", {}),
+            schema_version=data.get("schema_version", "1.0")  # Default to 1.0 for compatibility
         )
 
     def add_message(self, message: Message):
@@ -109,10 +116,42 @@ class Session:
 
         return summary
 
-    def update_provider_config(self, provider: str, model: str):
+    def update_provider_config(self, provider: str, model: str, provider_type: str = "legacy"):
         """Update the provider configuration for this session."""
         self.provider_config = {
             "provider": provider,
-            "model": model
+            "model": model,
+            "provider_type": provider_type,  # "legacy" or "litellm"
+            "updated_at": datetime.now().isoformat()
         }
         self.updated_at = datetime.now()
+    
+    def update_litellm_config(self, provider: str, model: str, litellm_model: str, api_base: Optional[str] = None):
+        """Update the provider configuration for LiteLLM usage."""
+        self.provider_config = {
+            "provider": provider,
+            "model": model,
+            "provider_type": "litellm",
+            "litellm_model": litellm_model,  # The full LiteLLM model string like "openai/gpt-4o"
+            "api_base": api_base,
+            "updated_at": datetime.now().isoformat()
+        }
+        self.updated_at = datetime.now()
+    
+    def get_provider_type(self) -> str:
+        """Get the provider type (legacy or litellm)."""
+        return self.provider_config.get("provider_type", "legacy")
+    
+    def get_litellm_model(self) -> Optional[str]:
+        """Get the LiteLLM model string if using LiteLLM."""
+        if self.get_provider_type() == "litellm":
+            return self.provider_config.get("litellm_model")
+        return None
+    
+    def get_api_base(self) -> Optional[str]:
+        """Get the API base URL if specified."""
+        return self.provider_config.get("api_base")
+    
+    def is_litellm_session(self) -> bool:
+        """Check if this session is using LiteLLM."""
+        return self.get_provider_type() == "litellm"
