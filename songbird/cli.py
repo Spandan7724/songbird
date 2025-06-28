@@ -448,6 +448,156 @@ def replay_conversation(session: Session):
             i += 1
 
 
+
+async def interactive_set_default():
+    """Interactive menu for setting default provider and model."""
+    from .llm.providers import get_provider_info
+    from .commands.model_command import ModelCommand
+    from .conversation import safe_interactive_menu
+    
+    # Get available providers (disable discovery to avoid event loop issues, use quiet mode)
+    provider_info = get_provider_info(use_discovery=False, quiet=True)
+    available_providers = [name for name, info in provider_info.items() if info["ready"]]
+    
+    if not available_providers:
+        console.print("[red]No providers are ready (missing API keys or services not running)[/red]")
+        console.print("[yellow]Configure providers first:[/yellow]")
+        console.print("  export OPENAI_API_KEY='...'")
+        console.print("  export ANTHROPIC_API_KEY='...'") 
+        console.print("  export GEMINI_API_KEY='...'")
+        console.print("  ollama serve  # For local models")
+        return
+    
+    # Provider selection
+    console.print("\n[bold cornflower_blue]Select Default Provider:[/bold cornflower_blue]")
+    provider_options = available_providers + ["Cancel"]
+    
+    provider_idx = await safe_interactive_menu(
+        "Choose default provider:", 
+        provider_options,
+        default_index=0
+    )
+    
+    if provider_idx is None or provider_idx == len(available_providers):
+        console.print("[white dim]Default setting cancelled[/white dim]")
+        return
+    
+    selected_provider = available_providers[provider_idx]
+    
+    # Model selection for the chosen provider
+    console.print(f"\n[bold cornflower_blue]Select Default Model for {selected_provider}:[/bold cornflower_blue]")
+    
+    # Get models for this provider (use same method as /model command for consistency)
+    try:
+        model_cmd = ModelCommand()
+        if selected_provider == "copilot":
+            models = model_cmd._get_copilot_models()
+        else:
+            models = model_cmd._get_litellm_models(selected_provider)
+    except Exception as e:
+        console.print(f"[yellow]Could not get models for {selected_provider}: {e}[/yellow]")
+        # Use provider's default model
+        set_default_provider_and_model(selected_provider, None)
+        return
+    
+    if not models:
+        console.print(f"[yellow]No models available for {selected_provider}[/yellow]")
+        set_default_provider_and_model(selected_provider, None)
+        return
+    
+    # Add cancel option
+    model_options = models + ["Cancel"]
+    
+    model_idx = await safe_interactive_menu(
+        f"Choose default model for {selected_provider}:",
+        model_options,
+        default_index=0
+    )
+    
+    if model_idx is None or model_idx == len(models):
+        console.print("[white dim]Model selection cancelled[/white dim]")
+        return
+    
+    selected_model = models[model_idx]
+    set_default_provider_and_model(selected_provider, selected_model)
+
+
+def set_default_provider_and_model(provider_name: str, model_name: Optional[str] = None):
+    """Set the default provider and optionally model in configuration."""
+    from .config.config_manager import get_config_manager
+    from .commands.model_command import ModelCommand
+    
+    # Validate provider
+    valid_providers = ["openai", "claude", "gemini", "ollama", "openrouter", "copilot"]
+    if provider_name not in valid_providers:
+        console.print(f"[red]Error: Invalid provider '{provider_name}'[/red]")
+        console.print(f"[yellow]Valid providers: {', '.join(valid_providers)}[/yellow]")
+        return
+    
+    # Check if provider has prerequisites
+    model_cmd = ModelCommand()
+    is_ready, error_msg = model_cmd._check_provider_prerequisites(provider_name)
+    if not is_ready:
+        console.print(f"[red]Error: Provider '{provider_name}' is not ready[/red]")
+        console.print(f"[yellow]{error_msg}[/yellow]")
+        return
+    
+    # Get configuration manager
+    config_manager = get_config_manager()
+    config = config_manager.get_config()
+    
+    # If no model specified, use provider's current default
+    if model_name is None:
+        model_name = config.llm.default_models.get(provider_name)
+        if not model_name:
+            # Use hardcoded defaults as fallback
+            fallback_models = {
+                "openai": "gpt-4o",
+                "claude": "claude-3-5-sonnet-20241022",
+                "gemini": "gemini-2.0-flash",
+                "ollama": "qwen2.5-coder:7b",
+                "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+                "copilot": "gpt-4o"
+            }
+            model_name = fallback_models.get(provider_name, "")
+    
+    # Validate model for the provider (optional - just warn if invalid)
+    try:
+        if provider_name == "copilot":
+            available_models = model_cmd._get_copilot_models()
+        else:
+            available_models = model_cmd._get_litellm_models(provider_name)
+        
+        if model_name and available_models and model_name not in available_models:
+            console.print(f"[yellow]Warning: Model '{model_name}' may not be available for {provider_name}[/yellow]")
+            console.print(f"[yellow]Available models: {', '.join(available_models[:5])}{'...' if len(available_models) > 5 else ''}[/yellow]")
+            
+            # Ask for confirmation
+            response = input("Continue anyway? (y/N): ").strip().lower()
+            if response not in ['y', 'yes']:
+                console.print("[white dim]Default setting cancelled[/white dim]")
+                return
+    except Exception as e:
+        # Non-critical - model validation failed, but continue anyway
+        console.print(f"[dim]Could not validate model availability: {e}[/dim]")
+    
+    # Update configuration
+    config.llm.default_provider = provider_name
+    if model_name:
+        config.llm.default_models[provider_name] = model_name
+    
+    # Save configuration
+    config_manager.save_config(config)
+    
+    # Show confirmation
+    console.print(f"[green]✓ Default provider set to:[/green] [bold]{provider_name}[/bold]")
+    if model_name:
+        console.print(f"[green]✓ Default model for {provider_name} set to:[/green] [bold]{model_name}[/bold]")
+    
+    console.print(f"\n[dim]Configuration saved to: {config_manager.config_file}[/dim]")
+    console.print("[dim]Use 'songbird' without --provider to use these defaults[/dim]")
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -460,7 +610,9 @@ def main(
     resume_session: bool = typer.Option(
         False, "--resume", "-r", help="Resume a previous session from a list"),
     provider_url: Optional[str] = typer.Option(
-        None, "--provider-url", help="Custom API base URL for provider", hidden=True)
+        None, "--provider-url", help="Custom API base URL for provider", hidden=True),
+    set_default: bool = typer.Option(
+        False, "--default", help="Set default provider and model interactively")
 ):
     """
     Songbird - Terminal-first AI coding companion
@@ -468,8 +620,15 @@ def main(
     Run 'songbird' to start an interactive chat session with AI and tools.
     Run 'songbird --continue' to continue your latest session.
     Run 'songbird --resume' to select and resume a previous session.
+    Run 'songbird --default' to set your default provider and model interactively.
     Run 'songbird version' to show version information.
     """
+    if set_default:
+        # Handle --default flag - always interactive mode
+        import asyncio
+        asyncio.run(interactive_set_default())
+        return
+    
     if list_providers:
         from .llm.providers import get_provider_info
         
@@ -511,6 +670,21 @@ def main(
         chat(provider=provider,
              continue_session=continue_session, resume_session=resume_session,
              provider_url=provider_url)
+
+
+@app.command()
+def default(
+    provider: Optional[str] = typer.Argument(None, help="Provider name (openai, claude, gemini, ollama, openrouter, copilot)"),
+    model: Optional[str] = typer.Argument(None, help="Model name (optional)")
+):
+    """Set default provider and optionally model for new sessions."""
+    if provider is None:
+        # Interactive mode
+        import asyncio
+        asyncio.run(interactive_set_default())
+    else:
+        # Direct mode with provider and optional model
+        set_default_provider_and_model(provider.lower(), model)
 
 
 @app.command(hidden=True)
@@ -620,17 +794,39 @@ def chat(
     # Use restored values if available, otherwise use defaults
     provider_name = restored_provider or provider or get_default_provider_name()
 
-    # Set default models based on provider
-    default_models = {
-        "openai": "gpt-4o",
-        "claude": "claude-3-5-sonnet-20241022",
-        "gemini": "gemini-2.0-flash",
-        "ollama": "qwen2.5-coder:7b",   
-        "openrouter": "deepseek/deepseek-chat-v3-0324:free",
-        "copilot": "gpt-4o"
-    }
-    model_name = restored_model or default_models.get(
-        provider_name, default_models.get("ollama"))
+    # Get default model from configuration
+    model_name = restored_model
+    if not model_name:
+        try:
+            from .config.config_manager import get_config_manager
+            config_manager = get_config_manager()
+            config = config_manager.get_config()
+            
+            # Get configured default model for this provider
+            model_name = config.llm.default_models.get(provider_name)
+            
+            if not model_name:
+                # Fallback to hardcoded defaults
+                fallback_models = {
+                    "openai": "gpt-4o",
+                    "claude": "claude-3-5-sonnet-20241022",
+                    "gemini": "gemini-2.0-flash",
+                    "ollama": "qwen2.5-coder:7b",   
+                    "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+                    "copilot": "gpt-4o"
+                }
+                model_name = fallback_models.get(provider_name, fallback_models.get("ollama"))
+        except Exception:
+            # If config loading fails, use hardcoded defaults
+            fallback_models = {
+                "openai": "gpt-4o",
+                "claude": "claude-3-5-sonnet-20241022", 
+                "gemini": "gemini-2.0-flash",
+                "ollama": "qwen2.5-coder:7b",   
+                "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+                "copilot": "gpt-4o"
+            }
+            model_name = fallback_models.get(provider_name, fallback_models.get("ollama"))
 
     # Save initial provider config to session (if we have a session)
     if session:
@@ -653,8 +849,8 @@ def chat(
     try:
         # All providers now use LiteLLM except Copilot (custom provider)
         if provider_name == "copilot":
-            from .llm.providers import get_provider
-            provider_instance = get_provider(provider_name)
+            from .llm.providers import get_copilot_provider
+            provider_instance = get_copilot_provider(model=model_name)
             
             # Update session with custom provider config if we have a session
             if session:

@@ -432,22 +432,22 @@ class ModelCommand(BaseCommand):
         if provider_name == "openai":
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
-                return False, "OPENAI_API_KEY environment variable not set\n\n🔗 Get your API key from: https://platform.openai.com/api-keys\n💡 Set it with: export OPENAI_API_KEY='your-key-here'"
+                return False, "OPENAI_API_KEY environment variable not set\n\n Get your API key from: https://platform.openai.com/api-keys\n Set it with: export OPENAI_API_KEY='your-key-here'"
                 
         elif provider_name == "claude":
             api_key = os.getenv("ANTHROPIC_API_KEY")
             if not api_key:
-                return False, "ANTHROPIC_API_KEY environment variable not set\n\n🔗 Get your API key from: https://console.anthropic.com/account/keys\n💡 Set it with: export ANTHROPIC_API_KEY='your-key-here'"
+                return False, "ANTHROPIC_API_KEY environment variable not set\n\n Get your API key from: https://console.anthropic.com/account/keys\n Set it with: export ANTHROPIC_API_KEY='your-key-here'"
                 
         elif provider_name == "gemini":
             api_key = os.getenv("GEMINI_API_KEY")
             if not api_key:
-                return False, "GEMINI_API_KEY environment variable not set\n\n🔗 Get your FREE API key from: https://aistudio.google.com/app/apikey\n💡 Set it with: export GEMINI_API_KEY='your-key-here'"
+                return False, "GEMINI_API_KEY environment variable not set\n\n Get your FREE API key from: https://aistudio.google.com/app/apikey\n Set it with: export GEMINI_API_KEY='your-key-here'"
                 
         elif provider_name == "openrouter":
             api_key = os.getenv("OPENROUTER_API_KEY")
             if not api_key:
-                return False, "OPENROUTER_API_KEY environment variable not set\n\n🔗 Get your API key from: https://openrouter.ai/keys\n💡 Set it with: export OPENROUTER_API_KEY='your-key-here'"
+                return False, "OPENROUTER_API_KEY environment variable not set\n\n Get your API key from: https://openrouter.ai/keys\n Set it with: export OPENROUTER_API_KEY='your-key-here'"
                 
         elif provider_name == "ollama":
             # Check if Ollama service is running
@@ -462,7 +462,7 @@ class ModelCommand(BaseCommand):
         elif provider_name == "copilot":
             token = os.getenv("COPILOT_ACCESS_TOKEN")
             if not token:
-                return False, "COPILOT_ACCESS_TOKEN environment variable not set\n\n🔗 Get your token from GitHub Copilot settings\n💡 Set it with: export COPILOT_ACCESS_TOKEN='your-token-here'"
+                return False, "COPILOT_ACCESS_TOKEN environment variable not set\n\n Get your token from GitHub Copilot settings\n Set it with: export COPILOT_ACCESS_TOKEN='your-token-here'"
         
         return True, ""
     

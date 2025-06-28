@@ -57,6 +57,9 @@ export GEMINI_API_KEY="your-api-key-here"
 # Start coding with AI
 songbird
 
+# Set your default provider (one-time setup)
+songbird --default
+
 # Continue your previous session
 songbird --continue
 
@@ -80,6 +83,9 @@ export COPILOT_ACCESS_TOKEN="your-copilot-token-here"
 # Start coding with GitHub Copilot
 songbird --provider copilot
 
+# Set Copilot as your default (one-time setup)
+songbird default copilot
+
 # Continue previous session with Copilot
 songbird --provider copilot --continue
 ```
@@ -99,6 +105,9 @@ ollama pull devstral:latest
 
 # Start coding with AI
 songbird --provider ollama
+
+# Set Ollama as your default (one-time setup)  
+songbird default ollama
 
 # Continue previous session with Ollama
 songbird --provider ollama --continue
@@ -293,9 +302,18 @@ songbird --provider ollama
 # List available providers
 songbird --list-providers
 
+# Set default provider (no need to specify --provider every time)
+songbird --default               # Interactive menu to set defaults
+songbird default gemini          # Set Gemini as default provider
+songbird default copilot gpt-4o  # Set Copilot with specific model
+songbird default ollama qwen2.5-coder:7b  # Set Ollama with specific model
+
+# After setting defaults, just use:
+songbird                 # Uses your configured defaults
+
 # Session management
-songbird --continue    # Continue latest session
-songbird --resume      # Pick from previous sessions
+songbird --continue      # Continue latest session
+songbird --resume        # Pick from previous sessions
 
 # Show available commands
 songbird --help
@@ -322,6 +340,61 @@ Once in a conversation, use these powerful commands:
 # Session management
 /clear                    # Clear conversation history
 /clear --force            # Clear without confirmation
+```
+
+## Configuration
+
+### Default Provider & Model Setup
+
+Songbird lets you set default providers and models so you don't have to specify them every time:
+
+```bash
+# Interactive setup - shows menu to choose provider and model
+songbird --default
+
+# Direct setup - set provider only (uses provider's default model)
+songbird default gemini
+songbird default copilot  
+songbird default ollama
+
+# Direct setup - set both provider and specific model
+songbird default openai gpt-4o-mini
+songbird default claude claude-3-5-sonnet-20241022
+songbird default gemini gemini-2.0-flash-001
+songbird default ollama qwen2.5-coder:7b
+songbird default copilot gpt-4.1-2025-04-14
+
+# After setting defaults, simply run:
+songbird  # Uses your configured provider and model
+```
+
+### Configuration File
+
+Songbird stores your preferences in `~/.songbird/config.json`:
+
+```json
+{
+  "llm": {
+    "default_provider": "gemini",
+    "default_models": {
+      "openai": "gpt-4o",
+      "claude": "claude-3-5-sonnet-20241022", 
+      "gemini": "gemini-2.0-flash-001",
+      "ollama": "qwen2.5-coder:7b",
+      "copilot": "gpt-4.1-2025-04-14"
+    }
+  }
+}
+```
+
+### Environment Variable Overrides
+
+You can override any configuration with environment variables:
+
+```bash
+export SONGBIRD_DEFAULT_PROVIDER="gemini"
+export SONGBIRD_MAX_TOKENS=8192
+export SONGBIRD_TEMPERATURE=0.3
 ```
 
 

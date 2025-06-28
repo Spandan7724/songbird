@@ -47,7 +47,7 @@ class CopilotProvider(UnifiedProviderInterface):
             "User-Agent": "Songbird/1.0"
         }
         
-        logger.info(f"Initialized GitHub Copilot provider with model: {model}")
+        logger.debug(f"Initialized GitHub Copilot provider with model: {model}")
     
     def get_provider_name(self) -> str:
         """Get the provider name."""

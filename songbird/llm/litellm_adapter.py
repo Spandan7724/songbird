@@ -895,7 +895,7 @@ class LiteLLMAdapter(UnifiedProviderInterface):
         
         if old_api_base != new_api_base:
             logger.info(f"API base changed from {old_api_base} to {new_api_base}")
-            console.print(f"[dim]🔗 API base updated: {new_api_base or 'default'}[/dim]")
+            console.print(f"[dim] API base updated: {new_api_base or 'default'}[/dim]")
     
     def get_api_base(self) -> Optional[str]:
         """Get the current API base URL."""
