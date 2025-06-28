@@ -1,20 +1,25 @@
 # tests/test_integration.py
 """
-Integration tests for the complete agentic Songbird system.
+Integration tests for the entire Songbird system.
 
-Tests the full end-to-end functionality with real providers (when available)
-and comprehensive workflow scenarios.
+Tests the complete flow from CLI input to file operations,
+including provider integration, tool calling, and session management.
 """
-import pytest
+import asyncio
 import os
 import tempfile
-import asyncio
+import pytest
 from pathlib import Path
-from unittest.mock import patch
-from songbird.conversation import ConversationOrchestrator
+from unittest.mock import Mock, patch, AsyncMock
+
 from songbird.llm.providers import (
-    OllamaProvider, get_default_provider, list_available_providers
+    get_litellm_provider, get_provider, list_available_providers, 
+    get_default_provider, BaseProvider
 )
+from songbird.llm.types import ChatResponse
+from songbird.orchestrator import SongbirdOrchestrator
+from songbird.memory.models import Session
+from songbird.conversation import ConversationOrchestrator
 
 
 class TestSongbirdIntegration:
@@ -40,9 +45,6 @@ class TestSongbirdIntegration:
     @pytest.mark.asyncio
     async def test_basic_agentic_workflow_with_mocks(self, temp_workspace):
         """Test basic agentic workflow with mocked provider."""
-        from unittest.mock import Mock, AsyncMock
-        from songbird.llm.types import ChatResponse
-        
         # Create mock provider
         mock_provider = Mock()
         mock_provider.chat_with_messages = AsyncMock()
@@ -112,9 +114,6 @@ class TestSongbirdIntegration:
     @pytest.mark.asyncio
     async def test_error_recovery_in_agentic_loop(self, temp_workspace):
         """Test error recovery during agentic workflow."""
-        from unittest.mock import Mock, AsyncMock
-        from songbird.llm.types import ChatResponse
-        
         mock_provider = Mock()
         mock_provider.chat_with_messages = AsyncMock()
         
@@ -184,7 +183,7 @@ class TestSongbirdIntegration:
     async def test_real_ollama_integration(self, temp_workspace):
         """Test integration with real Ollama server (if available)."""
         try:
-            provider = OllamaProvider(model="qwen2.5-coder:7b")
+            provider = get_litellm_provider(model="qwen2.5-coder:7b")
             orchestrator = ConversationOrchestrator(provider, temp_workspace)
             
             # Simple test to verify Ollama integration
@@ -235,9 +234,6 @@ class TestSongbirdIntegration:
     @pytest.mark.asyncio
     async def test_parallel_vs_sequential_execution_integration(self, temp_workspace):
         """Test that parallel vs sequential execution works in integration."""
-        from unittest.mock import Mock, AsyncMock
-        from songbird.llm.types import ChatResponse
-        
         mock_provider = Mock()
         mock_provider.chat_with_messages = AsyncMock()
         
@@ -294,8 +290,6 @@ class TestSongbirdIntegration:
 
     def test_enhanced_system_prompt_integration(self, temp_workspace):
         """Test that the enhanced system prompt is properly integrated."""
-        from unittest.mock import Mock
-        
         mock_provider = Mock()
         orchestrator = ConversationOrchestrator(mock_provider, temp_workspace)
         
@@ -320,10 +314,6 @@ class TestSongbirdIntegration:
     @pytest.mark.asyncio
     async def test_conversation_persistence_integration(self, temp_workspace):
         """Test conversation persistence works with agentic workflow."""
-        from unittest.mock import Mock, AsyncMock
-        from songbird.llm.types import ChatResponse
-        from songbird.memory.models import Session
-        
         mock_provider = Mock()
         mock_provider.chat_with_messages = AsyncMock()
         

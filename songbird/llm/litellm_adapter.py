@@ -1,12 +1,18 @@
 # songbird/llm/litellm_adapter.py
 """LiteLLM adapter providing unified interface for all providers."""
 
+import asyncio
 import litellm
 import logging
+import warnings
 from typing import AsyncGenerator, List, Dict, Any, Optional
 from rich.console import Console
 from .unified_interface import UnifiedProviderInterface
 from .types import ChatResponse
+from .http_session_manager import session_manager
+
+# HTTP session management is now handled by http_session_manager
+import logging
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -40,26 +46,42 @@ class LiteLLMModelError(LiteLLMError):
 class LiteLLMAdapter(UnifiedProviderInterface):
     """Unified LiteLLM adapter that replaces all provider-specific implementations."""
     
-    def __init__(self, model: str, api_base: Optional[str] = None, **kwargs):
+    def __init__(
+        self,
+        model: str,
+        api_base: Optional[str] = None,
+        provider_name: Optional[str] = None,
+        **kwargs,
+    ):
         """
         Initialize LiteLLM adapter.
         
         Args:
-            model: LiteLLM model string (e.g., "openai/gpt-4o", "anthropic/claude-3-5-sonnet")
+            model: Model string (e.g., "gpt-4o", "gemini-2.0-flash-001") or LiteLLM string
             api_base: Optional custom API base URL
+            provider_name: The provider name (e.g., "openai", "gemini", "ollama")
             **kwargs: Additional parameters (temperature, max_tokens, etc.)
         """
+        # ------------------------------------------------------------------
+        # Guarantee the model starts with the right provider prefix exactly once.
+        # This is idempotent and handles complex cases like:
+        # deepseek/deepseek-chat-v3-0324:free -> openrouter/deepseek/deepseek-chat-v3-0324:free
+        # ------------------------------------------------------------------
+        if provider_name and not model.startswith(f"{provider_name}/"):
+            model = f"{provider_name}/{model}"
+
         self.model = model
         self.api_base = api_base
         self.kwargs = kwargs
+
+        # Now the string definitely contains '/', so this split is safe.
+        self.vendor_prefix, self.model_name = model.split("/", 1)
         
-        # Extract vendor prefix and model name for caching
-        if "/" in model:
-            self.vendor_prefix, self.model_name = model.split("/", 1)
-        else:
-            # LiteLLM assumes OpenAI if no prefix
-            self.vendor_prefix = "openai"
-            self.model_name = model
+        # Ollama fallback: if model has tags (e.g., qwen2.5-coder:7b), 
+        # store base model for fallback if exact model isn't found
+        self.fallback_ollama_model = None
+        if self.vendor_prefix == "ollama":
+            self.fallback_ollama_model = self._construct_ollama_fallback_model(self.model_name)
         
         # State management for model swaps
         self._state_cache = {}
@@ -73,7 +95,122 @@ class LiteLLMAdapter(UnifiedProviderInterface):
         self._validate_model_compatibility()
         self._validate_environment_variables()
         
-        console.print(f"[dim]LiteLLM adapter initialized: {self.vendor_prefix}/{self.model_name}[/dim]")
+        logger.debug(f"LiteLLM adapter initialized: {self.vendor_prefix}/{self.model_name}")
+        
+        # Initialize managed HTTP session for this adapter
+        self._ensure_managed_session()
+    
+    def _ensure_managed_session(self):
+        """Set up LiteLLM to use our managed HTTP session."""
+        # This will be called to set up the session when first API call is made
+        self._session_initialized = False
+    
+    async def _setup_managed_session(self):
+        """Actually set up the managed session (async operation)."""
+        if not self._session_initialized:
+            try:
+                # Try aiohttp session first (better for closing orphaned sessions)
+                try:
+                    from .aiohttp_session_manager import aiohttp_session_manager
+                    aiohttp_session = await aiohttp_session_manager.get_session()
+                    litellm.aclient_session = aiohttp_session
+                    self._session_initialized = True
+                    logger.debug(f"Configured LiteLLM to use managed aiohttp session: {id(aiohttp_session)}")
+                    return
+                except Exception as aiohttp_error:
+                    logger.debug(f"Failed to set up aiohttp session: {aiohttp_error}, falling back to httpx")
+                
+                # Fallback to httpx session
+                if not await session_manager.health_check():
+                    logger.debug("Session unhealthy, resetting...")
+                    await session_manager.reset_session()
+                
+                # Get our managed httpx session
+                managed_session = await session_manager.get_session()
+                
+                # Configure LiteLLM to use our managed session
+                litellm.aclient_session = managed_session
+                
+                self._session_initialized = True
+                logger.debug(f"Configured LiteLLM to use managed httpx session: {id(managed_session)}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to set up managed session, LiteLLM will use default: {e}")
+    
+    async def get_session_health(self) -> dict:
+        """
+        Get detailed session health information for monitoring.
+        
+        Returns:
+            dict: Health status and metrics
+        """
+        try:
+            is_healthy = await session_manager.health_check()
+            
+            health_info = {
+                "healthy": is_healthy,
+                "session_initialized": getattr(self, '_session_initialized', False),
+                "litellm_session_set": litellm.aclient_session is not None,
+                "session_id": id(litellm.aclient_session) if litellm.aclient_session else None,
+                "session_closed": litellm.aclient_session.closed if litellm.aclient_session else None
+            }
+            
+            return health_info
+            
+        except Exception as e:
+            return {
+                "healthy": False,
+                "error": str(e),
+                "session_initialized": False,
+                "litellm_session_set": False
+            }
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit with cleanup."""
+        await self.cleanup()
+    
+    async def cleanup(self):
+        """Clean up HTTP sessions using both session managers."""
+        try:
+            logger.debug("Cleaning up LiteLLM adapter resources")
+            
+            # Reset LiteLLM session to prevent reuse of closed session
+            litellm.aclient_session = None
+            self._session_initialized = False
+            
+            # Cleanup both session managers
+            try:
+                from .aiohttp_session_manager import close_managed_aiohttp_session
+                await close_managed_aiohttp_session()
+                logger.debug("aiohttp session manager cleanup completed")
+            except Exception as e:
+                logger.debug(f"aiohttp session cleanup error: {e}")
+            
+            try:
+                from .http_session_manager import close_managed_session
+                await close_managed_session()
+                logger.debug("httpx session manager cleanup completed")
+            except Exception as e:
+                logger.debug(f"httpx session cleanup error: {e}")
+            
+            logger.debug("LiteLLM adapter cleanup completed")
+                        
+        except Exception as e:
+            logger.debug(f"Cleanup error (non-critical): {e}")
+    
+    async def _cleanup_http_sessions(self):
+        """Clean up HTTP sessions after API calls."""
+        try:
+            # Since we're using httpx with managed sessions,
+            # cleanup is handled by the session manager
+            logger.debug("HTTP session cleanup delegated to session manager")
+                        
+        except Exception as e:
+            logger.debug(f"HTTP session cleanup error (non-critical): {e}")
     
     def get_provider_name(self) -> str:
         """Get the provider name."""
@@ -99,6 +236,9 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             # Check if model changed and flush state if needed
             self.check_and_flush_if_model_changed()
             
+            # Ensure managed session is set up
+            await self._setup_managed_session()
+            
             logger.debug(f"Starting completion with {self.vendor_prefix}/{self.model_name}")
             
             # Prepare the completion call
@@ -107,6 +247,19 @@ class LiteLLMAdapter(UnifiedProviderInterface):
                 "messages": messages,
                 **self.kwargs
             }
+            
+            # Add api_base for specific providers that need it (exclude gemini/claude)
+            effective_api_base = self.get_effective_api_base()
+            if effective_api_base:
+                completion_kwargs["api_base"] = effective_api_base
+                
+            # For Gemini, ensure we use Google AI Studio API key
+            if self.vendor_prefix == "gemini" or self.model.startswith("gemini"):
+                import os
+                gemini_key = os.getenv("GEMINI_API_KEY")
+                if gemini_key:
+                    completion_kwargs["api_key"] = gemini_key
+                    # Let LiteLLM use default Google AI Studio endpoint
             
             # Add tools if provided (LiteLLM handles provider-specific formatting)
             if tools:
@@ -126,6 +279,35 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             return self._convert_to_songbird_response(response)
             
         except Exception as e:
+            # Ollama fallback: if model not found and we have a fallback, try base model
+            if (self.fallback_ollama_model and 
+                self._is_ollama_model_not_found_error(e)):
+                try:
+                    logger.debug(f"Ollama model {self.model} not found, trying fallback: {self.fallback_ollama_model}")
+                    fallback_kwargs = completion_kwargs.copy()
+                    fallback_kwargs["model"] = self.fallback_ollama_model
+                    response = await litellm.acompletion(**fallback_kwargs)
+                    logger.debug(f"Ollama fallback successful with {self.fallback_ollama_model}")
+                    return self._convert_to_songbird_response(response)
+                except Exception as fallback_error:
+                    logger.debug(f"Ollama fallback {self.fallback_ollama_model} also failed: {fallback_error}")
+                    
+                    # Try secondary fallback: base model without any tag
+                    if ":" in self.model_name:
+                        base_model = self.model_name.split(':', 1)[0]
+                        secondary_fallback = f"ollama/{base_model}"
+                        if secondary_fallback != self.fallback_ollama_model:
+                            try:
+                                logger.debug(f"Trying secondary Ollama fallback: {secondary_fallback}")
+                                fallback_kwargs["model"] = secondary_fallback
+                                response = await litellm.acompletion(**fallback_kwargs)
+                                logger.debug(f"Ollama secondary fallback successful with {secondary_fallback}")
+                                return self._convert_to_songbird_response(response)
+                            except Exception as secondary_error:
+                                logger.debug(f"Ollama secondary fallback also failed: {secondary_error}")
+                    
+                    # Fall through to original error handling
+            
             error = self._handle_completion_error(e, "completion")
             raise error
     
@@ -145,6 +327,9 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             # Check if model changed and flush state if needed
             self.check_and_flush_if_model_changed()
             
+            # Ensure managed session is set up
+            await self._setup_managed_session()
+            
             logger.debug(f"Starting streaming with {self.vendor_prefix}/{self.model_name}")
             
             # Prepare the streaming completion call
@@ -154,6 +339,19 @@ class LiteLLMAdapter(UnifiedProviderInterface):
                 "stream": True,
                 **self.kwargs
             }
+            
+            # Add api_base for specific providers that need it (exclude gemini/claude)
+            effective_api_base = self.get_effective_api_base()
+            if effective_api_base:
+                completion_kwargs["api_base"] = effective_api_base
+                
+            # For Gemini, ensure we use Google AI Studio API key
+            if self.vendor_prefix == "gemini" or self.model.startswith("gemini"):
+                import os
+                gemini_key = os.getenv("GEMINI_API_KEY")
+                if gemini_key:
+                    completion_kwargs["api_key"] = gemini_key
+                    # Let LiteLLM use default Google AI Studio endpoint
             
             # Add tools if provided with validation
             if tools:
@@ -186,6 +384,60 @@ class LiteLLMAdapter(UnifiedProviderInterface):
                     await stream.aclose()
                     
         except Exception as e:
+            # Ollama fallback: if model not found and we have a fallback, try base model
+            if (self.fallback_ollama_model and 
+                self._is_ollama_model_not_found_error(e)):
+                try:
+                    logger.debug(f"Ollama streaming model {self.model} not found, trying fallback: {self.fallback_ollama_model}")
+                    fallback_kwargs = completion_kwargs.copy()
+                    fallback_kwargs["model"] = self.fallback_ollama_model
+                    stream = await litellm.acompletion(**fallback_kwargs)
+                    logger.debug(f"Ollama streaming fallback successful with {self.fallback_ollama_model}")
+                    
+                    try:
+                        chunk_count = 0
+                        async for chunk in stream:
+                            chunk_count += 1
+                            logger.debug(f"Processing fallback chunk {chunk_count}")
+                            yield self._normalize_chunk(chunk)
+                        logger.debug(f"Streaming fallback completed with {chunk_count} chunks")
+                    finally:
+                        # Critical: Clean up the fallback stream
+                        if hasattr(stream, 'aclose'):
+                            await stream.aclose()
+                    return  # Success, exit the method
+                    
+                except Exception as fallback_error:
+                    logger.debug(f"Ollama streaming fallback {self.fallback_ollama_model} also failed: {fallback_error}")
+                    
+                    # Try secondary fallback: base model without any tag
+                    if ":" in self.model_name:
+                        base_model = self.model_name.split(':', 1)[0]
+                        secondary_fallback = f"ollama/{base_model}"
+                        if secondary_fallback != self.fallback_ollama_model:
+                            try:
+                                logger.debug(f"Trying secondary Ollama streaming fallback: {secondary_fallback}")
+                                fallback_kwargs["model"] = secondary_fallback
+                                stream = await litellm.acompletion(**fallback_kwargs)
+                                logger.debug(f"Ollama secondary streaming fallback successful with {secondary_fallback}")
+                                
+                                try:
+                                    chunk_count = 0
+                                    async for chunk in stream:
+                                        chunk_count += 1
+                                        logger.debug(f"Processing secondary fallback chunk {chunk_count}")
+                                        yield self._normalize_chunk(chunk)
+                                    logger.debug(f"Secondary streaming fallback completed with {chunk_count} chunks")
+                                finally:
+                                    # Critical: Clean up the secondary fallback stream
+                                    if hasattr(stream, 'aclose'):
+                                        await stream.aclose()
+                                return  # Success, exit the method
+                            except Exception as secondary_error:
+                                logger.debug(f"Ollama secondary streaming fallback also failed: {secondary_error}")
+                    
+                    # Fall through to original error handling
+            
             error = self._handle_completion_error(e, "streaming")
             logger.error(f"Streaming failed: {error}")
             raise error
@@ -270,6 +522,54 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             logger.debug(f"Full error details: {type(error).__name__}: {error}")
             return LiteLLMError(f"{context}: {detailed_msg}")
     
+    def _construct_ollama_fallback_model(self, model_name: str) -> Optional[str]:
+        """Construct Ollama fallback model for when exact model isn't found."""
+        if not model_name or ":" not in model_name:
+            return None  # No fallback needed for models without tags
+        
+        # Strip tag from model name (e.g., qwen2.5-coder:7b -> qwen2.5-coder)
+        base_model = model_name.split(':', 1)[0]
+        
+        # Some common fallback patterns for Ollama models
+        fallback_candidates = [
+            f"ollama/{base_model}:latest",  # Try with :latest tag
+            f"ollama/{base_model}",         # Try without any tag
+        ]
+        
+        # Return the first candidate (we'll try them in order during fallback)
+        return fallback_candidates[0]
+    
+    def _is_ollama_model_not_found_error(self, error: Exception) -> bool:
+        """Check if error indicates Ollama model not found (for fallback logic)."""
+        if self.vendor_prefix != "ollama":
+            return False
+        
+        error_msg = str(error).lower()
+        
+        # Common Ollama error patterns for model not found
+        model_not_found_patterns = [
+            "model not found",
+            "model does not exist", 
+            "pull model",
+            "invalid model",
+            "unknown model",
+            "model not available",
+            "model not pulled"
+        ]
+        
+        # Check basic patterns first
+        if any(pattern in error_msg for pattern in model_not_found_patterns):
+            return True
+        
+        # Check compound patterns  
+        if "404" in error_msg and "model" in error_msg:
+            return True
+            
+        if "model 'ollama/" in error_msg and "' not found" in error_msg:
+            return True
+            
+        return False
+    
     def _get_auth_error_help(self, provider: str) -> str:
         """Get provider-specific authentication help."""
         auth_help = {
@@ -277,7 +577,7 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             "anthropic": "Set ANTHROPIC_API_KEY environment variable. Get your key from: https://console.anthropic.com/account/keys",
             "claude": "Set ANTHROPIC_API_KEY environment variable. Get your key from: https://console.anthropic.com/account/keys",
             "gemini": "Set GEMINI_API_KEY environment variable. Get your key from: https://aistudio.google.com/app/apikey",
-            "google": "Set GOOGLE_API_KEY environment variable. Get your key from: https://aistudio.google.com/app/apikey",
+            "google": "Set GEMINI_API_KEY environment variable. Get your key from: https://aistudio.google.com/app/apikey",
             "openrouter": "Set OPENROUTER_API_KEY environment variable. Get your key from: https://openrouter.ai/keys",
             "ollama": "Ensure Ollama is running locally: ollama serve"
         }
@@ -421,25 +721,28 @@ class LiteLLMAdapter(UnifiedProviderInterface):
         """Validate model compatibility and show warnings for unknown models."""
         try:
             # Check if the model is a known LiteLLM format
-            if "/" not in self.model:
-                console.print(f"[yellow]⚠️  Model '{self.model}' doesn't use LiteLLM format (provider/model)[/yellow]")
+            # Special case: Gemini models don't need the gemini/ prefix in LiteLLM
+            gemini_models = ["gemini-2.0-flash-001", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro"]
+            
+            if "/" not in self.model and self.model not in gemini_models:
+                console.print(f"[yellow]Model '{self.model}' doesn't use LiteLLM format (provider/model)[/yellow]")
                 console.print(f"[yellow]   Expected format: {self.vendor_prefix}/{self.model_name}[/yellow]")
                 return
             
             # Check for common provider patterns
             known_providers = ["openai", "anthropic", "google", "gemini", "claude", "ollama", "openrouter"]
             if self.vendor_prefix not in known_providers:
-                console.print(f"[yellow]⚠️  Unknown provider prefix '{self.vendor_prefix}'[/yellow]")
+                console.print(f"[yellow]Unknown provider prefix '{self.vendor_prefix}'[/yellow]")
                 console.print(f"[yellow]   Known providers: {', '.join(known_providers)}[/yellow]")
                 console.print(f"[yellow]   LiteLLM may still support this provider[/yellow]")
             
             # Provider-specific model validation
             if self.vendor_prefix == "openai" and not any(pattern in self.model_name for pattern in ["gpt-", "text-", "davinci"]):
-                console.print(f"[yellow]⚠️  '{self.model_name}' doesn't match typical OpenAI model patterns[/yellow]")
+                console.print(f"[yellow]'{self.model_name}' doesn't match typical OpenAI model patterns[/yellow]")
             elif self.vendor_prefix == "anthropic" and not self.model_name.startswith("claude-"):
-                console.print(f"[yellow]⚠️  '{self.model_name}' doesn't match typical Anthropic model patterns[/yellow]")
+                console.print(f"[yellow]'{self.model_name}' doesn't match typical Anthropic model patterns[/yellow]")
             elif self.vendor_prefix == "gemini" and not self.model_name.startswith("gemini-"):
-                console.print(f"[yellow]⚠️  '{self.model_name}' doesn't match typical Gemini model patterns[/yellow]")
+                console.print(f"[yellow]'{self.model_name}' doesn't match typical Gemini model patterns[/yellow]")
                 
         except Exception as e:
             logger.debug(f"Model validation failed (non-critical): {e}")
@@ -454,11 +757,11 @@ class LiteLLMAdapter(UnifiedProviderInterface):
                 "openai": "OPENAI_API_KEY",
                 "anthropic": "ANTHROPIC_API_KEY", 
                 "claude": "ANTHROPIC_API_KEY",
-                "google": "GOOGLE_API_KEY",
+                "google": "GEMINI_API_KEY",
                 "gemini": "GEMINI_API_KEY",  # LiteLLM expects GEMINI_API_KEY for gemini provider
                 "openrouter": "OPENROUTER_API_KEY",
                 "together": "TOGETHER_API_KEY",
-                "groq": "GROQ_API_KEY"
+                "groq": "GROQ_API_KEY",
                 # Note: ollama doesn't require API keys
             }
             
@@ -471,7 +774,7 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             # Check if the environment variable is set
             value = os.getenv(env_var)
             if not value:
-                console.print(f"[yellow]⚠️  Missing environment variable: {env_var}[/yellow]")
+                console.print(f"[yellow]Missing environment variable: {env_var}[/yellow]")
                 console.print(f"[yellow]   Provider '{self.vendor_prefix}' requires this API key to function[/yellow]")
                 console.print(f"[yellow]   LiteLLM will attempt to use the provider anyway[/yellow]")
             else:
@@ -486,42 +789,8 @@ class LiteLLMAdapter(UnifiedProviderInterface):
     async def cleanup(self):
         """Clean up resources to prevent connection leaks."""
         try:
-            # Force cleanup of LiteLLM's internal aiohttp sessions
-            import asyncio
-            import gc
-            
-            # Try to access and close any aiohttp connector pools
-            try:
-                # LiteLLM uses aiohttp internally, try to clean up any sessions
-                import aiohttp
-                
-                # Look for any unclosed sessions and close them
-                for obj in gc.get_objects():
-                    if isinstance(obj, aiohttp.ClientSession) and not obj.closed:
-                        try:
-                            await obj.close()
-                        except Exception:
-                            pass  # Ignore errors during cleanup
-                
-                # Force close any connectors
-                for obj in gc.get_objects():
-                    if isinstance(obj, aiohttp.TCPConnector) and not obj.closed:
-                        try:
-                            await obj.close()
-                        except Exception:
-                            pass  # Ignore errors during cleanup
-                
-                # Give time for cleanup to complete
-                await asyncio.sleep(0.1)
-                
-                # Force garbage collection
-                gc.collect()
-                
-                logger.debug("LiteLLM adapter cleanup completed")
-                
-            except Exception as cleanup_error:
-                logger.debug(f"Minor cleanup issue (non-critical): {cleanup_error}")
-                
+            # Simple cleanup - let LiteLLM handle its own resource management
+            logger.debug("LiteLLM adapter cleanup completed")
         except Exception as e:
             logger.debug(f"Cleanup failed (non-critical): {e}")
     
@@ -544,8 +813,8 @@ class LiteLLMAdapter(UnifiedProviderInterface):
                 "openai": "OPENAI_API_KEY",
                 "anthropic": "ANTHROPIC_API_KEY",
                 "claude": "ANTHROPIC_API_KEY", 
-                "google": "GOOGLE_API_KEY",
-                "gemini": "GOOGLE_API_KEY",
+                "google": "GEMINI_API_KEY",
+                "gemini": "GEMINI_API_KEY",
                 "openrouter": "OPENROUTER_API_KEY",
                 "together": "TOGETHER_API_KEY",
                 "groq": "GROQ_API_KEY"
@@ -588,10 +857,11 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             if "/" in self.model:
                 self.vendor_prefix, self.model_name = self.model.split("/", 1)
             else:
-                self.vendor_prefix = "openai"
+                # If no prefix, preserve existing vendor_prefix instead of defaulting to "openai"
+                logger.warning(f"Model '{self.model}' has no provider prefix, keeping existing vendor_prefix: {self.vendor_prefix}")
                 self.model_name = self.model
             
-            console.print(f"[dim]🔄 State flushed for model change: {self.vendor_prefix}/{self.model_name}[/dim]")
+            console.print(f"[dim]State flushed for model change: {self.vendor_prefix}/{self.model_name}[/dim]")
             
         except Exception as e:
             logger.error(f"Error flushing state: {e}")
@@ -636,16 +906,18 @@ class LiteLLMAdapter(UnifiedProviderInterface):
         if self.api_base:
             return self.api_base
         
-        # Return default URLs for common providers
+        # Return default URLs for common providers that need custom endpoints
         defaults = {
             "openai": "https://api.openai.com/v1",
             "anthropic": "https://api.anthropic.com",
             "openrouter": "https://openrouter.ai/api/v1",
+            "ollama": "http://localhost:11434",
             "together": "https://api.together.xyz",
-            "groq": "https://api.groq.com/openai/v1"
+            "groq": "https://api.groq.com/openai/v1",
+            # Note: gemini and claude should use LiteLLM default routing
         }
         
-        return defaults.get(self.vendor_prefix, "https://api.openai.com/v1")
+        return defaults.get(self.vendor_prefix)
     
     def chat(self, message: str, tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """
@@ -654,7 +926,6 @@ class LiteLLMAdapter(UnifiedProviderInterface):
         Note: This is a synchronous wrapper that should be avoided.
         Use chat_with_messages() instead for async operation.
         """
-        import asyncio
         
         messages = [{"role": "user", "content": message}]
         
@@ -667,61 +938,8 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             return asyncio.run(self.chat_with_messages(messages, tools))
 
 
-def create_litellm_provider(provider_name: str, model: str = None, 
-                           api_base: str = None, **kwargs) -> LiteLLMAdapter:
-    """
-    Factory function to create LiteLLM provider instances with enhanced API base URL support.
-    
-    Args:
-        provider_name: Provider name (openai, claude, gemini, ollama, openrouter)
-        model: Specific model name (optional, uses default if not provided)
-        api_base: Custom API base URL (optional)
-        **kwargs: Additional parameters for the adapter
-        
-    Returns:
-        LiteLLMAdapter: Configured adapter instance
-    """
-    from ..config import load_provider_mapping
-    
-    try:
-        # Load configuration
-        config = load_provider_mapping()
-        
-        # Resolve model string
-        litellm_model = config.resolve_model_string(provider_name, model)
-        
-        # Handle API base URL priority:
-        # 1. Explicitly provided api_base parameter
-        # 2. Configuration file mapping
-        # 3. Provider-specific defaults
-        effective_api_base = api_base
-        if not effective_api_base:
-            effective_api_base = config.get_api_base(provider_name)
-        
-        # Log API base URL resolution for debugging
-        if effective_api_base:
-            console.print(f"[dim]Using API base for {provider_name}: {effective_api_base}[/dim]")
-        else:
-            console.print(f"[dim]Using default API endpoint for {provider_name}[/dim]")
-        
-        # Create adapter
-        adapter = LiteLLMAdapter(
-            model=litellm_model,
-            api_base=effective_api_base,
-            **kwargs
-        )
-        
-        # Display creation summary
-        if effective_api_base:
-            console.print(f"[dim]Created LiteLLM provider: {provider_name} -> {litellm_model} @ {effective_api_base}[/dim]")
-        else:
-            console.print(f"[dim]Created LiteLLM provider: {provider_name} -> {litellm_model}[/dim]")
-        
-        return adapter
-        
-    except Exception as e:
-        console.print(f"[red]Failed to create LiteLLM provider: {e}[/red]")
-        raise
+# Note: create_litellm_provider function moved to providers.py to avoid duplication
+# and ensure proper provider_name parameter passing
 
 
 # Convenience function for testing

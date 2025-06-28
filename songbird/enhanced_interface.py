@@ -309,7 +309,7 @@ def create_enhanced_help() -> str:
 [bold]Available Providers:[/bold]
   openai      OpenAI GPT models (requires OPENAI_API_KEY)
   claude      Anthropic Claude (requires ANTHROPIC_API_KEY)
-  gemini      Google Gemini (requires GOOGLE_API_KEY)
+  gemini      Google Gemini (requires GEMINI_API_KEY)
   ollama      Local Ollama models (no API key needed)
   openrouter  OpenRouter multi-provider (requires OPENROUTER_API_KEY)
 
@@ -327,7 +327,7 @@ def create_enhanced_help() -> str:
 [bold]Environment Variables:[/bold]
   OPENAI_API_KEY      OpenAI API key
   ANTHROPIC_API_KEY   Anthropic Claude API key
-  GOOGLE_API_KEY      Google Gemini API key
+  GEMINI_API_KEY      Google Gemini API key
   OPENROUTER_API_KEY  OpenRouter API key
   SONGBIRD_AUTO_APPLY Auto-apply file edits (y/n)
 

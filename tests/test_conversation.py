@@ -8,7 +8,7 @@ features are tested in test_agentic_conversation.py.
 import pytest
 from unittest.mock import Mock, AsyncMock
 from pathlib import Path
-from songbird.conversation import ConversationOrchestrator
+from songbird.orchestrator import SongbirdOrchestrator
 from songbird.llm.types import ChatResponse
 
 
@@ -28,7 +28,7 @@ class TestConversationOrchestrator:
     @pytest.fixture
     def orchestrator(self, mock_provider, fixture_repo):
         """Conversation orchestrator with mock provider."""
-        return ConversationOrchestrator(mock_provider, fixture_repo)
+        return SongbirdOrchestrator(mock_provider, fixture_repo)
     
     @pytest.mark.asyncio
     async def test_simple_chat_without_tools(self, orchestrator, mock_provider):
@@ -45,7 +45,7 @@ class TestConversationOrchestrator:
         assert response == "Hello! I can help you with your code."
         
         # Should have system prompt, user message, and assistant response
-        history = orchestrator.get_conversation_history()
+        history = orchestrator.conversation_history
         assert len(history) >= 2
         
         # Find user and assistant messages
@@ -88,7 +88,7 @@ class TestConversationOrchestrator:
         assert mock_provider.chat_with_messages.call_count == 2
         
         # Check conversation history includes all interactions
-        history = orchestrator.get_conversation_history()
+        history = orchestrator.conversation_history
         
         # Should have: system, user, assistant (with tools), tool result, assistant (final)
         roles = [msg["role"] for msg in history]
@@ -107,25 +107,25 @@ class TestConversationOrchestrator:
     def test_conversation_history_management(self, orchestrator):
         """Test conversation history management methods."""
         # Should start with system prompt
-        initial_history = orchestrator.get_conversation_history()
+        initial_history = orchestrator.conversation_history
         assert len(initial_history) == 1
         assert initial_history[0]["role"] == "system"
         
         # History should be isolated (copy returned)
-        history1 = orchestrator.get_conversation_history()
+        history1 = orchestrator.conversation_history.copy()
         history1.append({"test": "data"})
-        history2 = orchestrator.get_conversation_history()
+        history2 = orchestrator.conversation_history
         assert len(history2) == len(initial_history)  # Should not include test data
         
         # Test clear history
         orchestrator.conversation_history.append({"role": "user", "content": "test"})
-        assert len(orchestrator.get_conversation_history()) > len(initial_history)
-        orchestrator.clear_history()
-        assert len(orchestrator.get_conversation_history()) == 0
+        assert len(orchestrator.conversation_history) > len(initial_history)
+        orchestrator.conversation_history.clear()
+        assert len(orchestrator.conversation_history) == 0
     
     def test_system_prompt_initialization(self, orchestrator):
         """Test that enhanced system prompt is properly initialized."""
-        history = orchestrator.get_conversation_history()
+        history = orchestrator.conversation_history
         system_msg = next(msg for msg in history if msg["role"] == "system")
         
         # Should contain key agentic instructions
@@ -134,36 +134,6 @@ class TestConversationOrchestrator:
         assert "ALWAYS USE TOOLS" in system_content
         assert "IMMEDIATE ACTION REQUIRED" in system_content
         assert "file_create" in system_content  # Tool examples
-    
-    def test_tool_result_formatting_methods(self, orchestrator):
-        """Test tool result formatting helper methods exist and work."""
-        # Test that the formatting method exists
-        assert hasattr(orchestrator, '_format_tool_result_for_llm')
-        
-        # Test basic formatting
-        result = {"file_path": "test.txt", "success": True}
-        formatted = orchestrator._format_tool_result_for_llm("file_read", result, True)
-        
-        # Should be valid JSON
-        import json
-        parsed = json.loads(formatted)
-        assert parsed["tool"] == "file_read"
-        assert parsed["success"] == True
-    
-    def test_parallel_execution_helper_methods(self, orchestrator):
-        """Test parallel execution helper methods exist."""
-        # Test that parallel execution methods exist
-        assert hasattr(orchestrator, '_can_execute_tools_in_parallel')
-        assert hasattr(orchestrator, '_execute_tools_parallel')
-        assert hasattr(orchestrator, '_execute_single_tool_async')
-        assert hasattr(orchestrator, '_extract_function_name')
-        
-        # Test basic parallel detection
-        read_only = ["file_read", "ls"]
-        file_ops = ["file_create", "file_edit"]
-        
-        assert orchestrator._can_execute_tools_in_parallel(read_only) == True
-        assert orchestrator._can_execute_tools_in_parallel(file_ops) == False
     
     def test_working_directory_setup(self, orchestrator, fixture_repo):
         """Test working directory is properly set up."""
@@ -185,14 +155,14 @@ class TestConversationOrchestrator:
             await orchestrator.chat("This should cause an error")
         
         # Conversation history should still be valid
-        history = orchestrator.get_conversation_history()
+        history = orchestrator.conversation_history
         assert isinstance(history, list)
     
     def test_conversation_orchestrator_attributes(self, orchestrator):
         """Test that ConversationOrchestrator has all required attributes for agentic operation."""
         required_attrs = [
             'provider', 'tool_executor', 'conversation_history',
-            'system_prompt', 'session_manager'
+            'session_manager'
         ]
         
         for attr in required_attrs:

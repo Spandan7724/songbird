@@ -14,8 +14,10 @@ import os
 from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock
 from songbird.cli import main as cli_main
-from songbird.llm.litellm_adapter import create_litellm_provider, LiteLLMAdapter
+from songbird.llm.providers import create_litellm_provider
+from songbird.llm.litellm_adapter import LiteLLMAdapter
 from songbird.config.mapping_loader import load_provider_mapping
+from songbird.llm.types import ChatResponse
 
 
 @pytest.mark.slow

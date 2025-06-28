@@ -5,11 +5,15 @@ import os
 import signal
 import sys
 import time
+import warnings
 from threading import Timer
 from typing import Optional
 from datetime import datetime
 import json
 import typer
+
+# HTTP session warnings should now be resolved by proper session management
+import logging
 from rich.console import Console
 from rich.status import Status
 from rich.panel import Panel
@@ -238,10 +242,7 @@ def display_session_selector(sessions: list[Session], session_manager) -> Option
         provider_info = ""
         if session.provider_config:
             provider = session.provider_config.get("provider", "unknown")
-            if session.is_litellm_session():
-                provider_info = f"[LiteLLM:{provider}]"
-            else:
-                provider_info = f"[{provider}]"
+            provider_info = f"[{provider}]"
         else:
             provider_info = "[legacy]"
         
@@ -627,9 +628,10 @@ def chat(
     default_models = {
         "openai": "gpt-4o",
         "claude": "claude-3-5-sonnet-20241022",
-        "gemini": "gemini-2.0-flash-001",
+        "gemini": "gemini-1.5-flash-latest",
         "ollama": "qwen2.5-coder:7b",
-        "openrouter": "deepseek/deepseek-chat-v3-0324:free"
+        "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+        "copilot": "gpt-4o"
     }
     model_name = restored_model or default_models.get(
         provider_name, default_models.get("ollama"))
@@ -647,12 +649,20 @@ def chat(
         console.print(
             f"Using provider: {provider_name}, model: {model_name}", style="dim")
 
+    # Configure aiohttp session management for Google GenAI SDK
+    try:
+        from .llm.aiohttp_session_manager import configure_google_genai_aiohttp
+        configure_google_genai_aiohttp()
+    except Exception as e:
+        # Non-critical error, continue without custom session configuration
+        pass
+    
     # Initialize LLM provider and conversation orchestrator
     try:
         if use_litellm:
             # Use LiteLLM unified provider
             from .llm.providers import get_litellm_provider
-            console.print(f"[cornflower_blue]Using LiteLLM unified interface for {provider_name}[/cornflower_blue]")
+            # console.print(f"[cornflower_blue]Using LiteLLM unified interface for {provider_name}[/cornflower_blue]")
             
             provider_instance = get_litellm_provider(
                 provider_name=provider_name,
@@ -673,7 +683,7 @@ def chat(
                 session_manager.save_session(session)
         else:
             # Since legacy providers have been removed, get_provider now returns LiteLLM providers
-            console.print(f"[cornflower_blue]Using LiteLLM unified interface for {provider_name}[/cornflower_blue]")
+            # console.print(f"[cornflower_blue]Using LiteLLM unified interface for {provider_name}[/cornflower_blue]")
             provider_instance = get_provider(provider_name)
             
             # Update session with LiteLLM configuration if we have a session
@@ -729,7 +739,7 @@ def chat(
                 "Get your API key from: https://console.anthropic.com/account/keys", style="dim")
         elif provider_name == "gemini":
             console.print(
-                "\n[bold]Gemini Setup:[/bold] Set GOOGLE_API_KEY environment variable", style="dim")
+                "\n[bold]Gemini Setup:[/bold] Set GEMINI_API_KEY environment variable", style="dim")
             console.print(
                 "Get your API key from: https://aistudio.google.com/app/apikey", style="dim")
         elif provider_name == "openrouter":
@@ -788,7 +798,7 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
 
                     if result.message:
                         if result.success:
-                            console.print(f"[green]{result.message}[/green]")
+                            console.print(f"[cornflower_blue]{result.message}[/cornflower_blue]")
                         else:
                             console.print(f"[red]{result.message}[/red]")
 
@@ -821,12 +831,12 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
                                         litellm_model=provider_instance.model,  # The resolved LiteLLM model string
                                         api_base=getattr(provider_instance, 'api_base', None)
                                     )
-                                    console.print(f"[dim]🔄 LiteLLM model changed: {provider_name} - {new_model} -> {provider_instance.model}[/dim]")
+                                    console.print(f"[dim]Model changed: {provider_name} - {new_model} -> {provider_instance.model}[/dim]")
                                 else:
                                     # For legacy providers, use legacy config
                                     orchestrator.session.update_provider_config(
                                         provider_name, new_model, provider_type="legacy")
-                                    console.print(f"[dim]🔄 Legacy model changed: {provider_name} - {new_model}[/dim]")
+                                    console.print(f"[dim]Legacy model changed: {provider_name} - {new_model}[/dim]")
                                 
                                 # Always save session when model changes
                                 orchestrator.session_manager.save_session(orchestrator.session)
@@ -835,14 +845,12 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
                                 from .memory.models import Message
                                 context_msg = Message(
                                     role="system",
-                                    content=f"🔄 Model switched to {new_model} via /model command"
+                                    content=f"Model switched to {new_model} via /model command"
                                 )
                                 orchestrator.session.add_message(context_msg)
 
                             # Show the model change
                             model_display = f"{provider_name} - {new_model}"
-                            if is_litellm_provider:
-                                model_display += f" (LiteLLM: {provider_instance.model})"
                             console.print(f"[dim]Now using: {model_display}[/dim]")
 
                     continue
@@ -898,11 +906,30 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
     
     # Clean up resources when exiting chat loop
     try:
+        # Clean up provider resources
         if hasattr(provider_instance, 'cleanup'):
             await provider_instance.cleanup()
+        
+        # Save session one final time
+        if orchestrator.session:
+            orchestrator.session_manager.save_session(orchestrator.session)
+        
+        # Clean up HTTP session manager
+        from .llm.http_session_manager import close_managed_session
+        await close_managed_session()
+
+        # Clean up aiohttp session manager
+        from .llm.aiohttp_session_manager import close_managed_aiohttp_session
+        await close_managed_aiohttp_session()
+        
+        # Additional cleanup
+        import gc
+        await asyncio.sleep(0.1)  # Give time for cleanup to complete
+        gc.collect()
+            
     except Exception as cleanup_error:
-        # Don't let cleanup errors affect normal exit
-        pass  # Silently ignore cleanup errors
+        # Don't let cleanup errors crash the exit
+        console.print(f"[dim yellow]Minor cleanup issue: {cleanup_error}[/dim yellow]")
 
 
 

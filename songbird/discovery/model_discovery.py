@@ -70,9 +70,13 @@ class BaseModelDiscovery(ABC):
                 DiscoveredModel("claude-3-opus-20240229", "Claude 3 Opus", "anthropic", context_length=200000),
             ],
             "gemini": [
+                # Confirmed working models based on LiteLLM compatibility test
+                DiscoveredModel("gemini-2.0-flash", "Gemini 2.0 Flash", "gemini", context_length=1000000),
                 DiscoveredModel("gemini-2.0-flash-001", "Gemini 2.0 Flash", "gemini", context_length=1000000),
-                DiscoveredModel("gemini-1.5-pro", "Gemini 1.5 Pro", "gemini", context_length=2000000),
                 DiscoveredModel("gemini-1.5-flash", "Gemini 1.5 Flash", "gemini", context_length=1000000),
+                DiscoveredModel("gemini-1.5-flash-002", "Gemini 1.5 Flash", "gemini", context_length=1000000),
+                DiscoveredModel("gemini-2.5-flash", "Gemini 2.5 Flash", "gemini", context_length=1000000),
+                DiscoveredModel("gemini-1.5-flash-8b", "Gemini 1.5 Flash 8B", "gemini", context_length=1000000),
             ],
             "ollama": [
                 DiscoveredModel("qwen2.5-coder:7b", "Qwen2.5 Coder 7B", "ollama"),
@@ -209,6 +213,28 @@ class GeminiModelDiscovery(BaseModelDiscovery):
                    'generateContent' in model.supported_generation_methods:
                     
                     model_id = model.name.split('/')[-1]  # Extract model ID from full name
+                    
+                    # Skip models that actually fail in LiteLLM (based on compatibility test)
+                    failed_models = {
+                        'gemini-1.0-pro-vision-latest', 'gemini-1.5-pro', 'gemini-1.5-pro-002', 
+                        'gemini-1.5-pro-latest', 'gemini-2.0-flash-live-001', 
+                        'gemini-2.0-flash-preview-image-generation', 'gemini-2.0-pro-exp',
+                        'gemini-2.5-flash-exp-native-audio-thinking-dialog', 'gemini-2.0-pro-exp-02-05',
+                        'gemini-2.5-flash-preview-native-audio-dialog', 'gemini-2.5-pro-preview-06-05',
+                        'gemini-2.5-pro-preview-tts', 'gemini-2.5-flash-preview-tts', 'gemini-2.5-pro',
+                        'gemini-2.5-pro-preview-05-06', 'gemini-2.5-pro-preview-03-25', 'gemini-exp-1206',
+                        'gemini-live-2.5-flash-preview', 'gemini-pro-vision', 'gemini-embedding-exp',
+                        'gemini-embedding-exp-03-07'
+                        # Note: gemini-2.0-flash-001 and other -001 models ARE working
+                    }
+                    
+                    if model_id in failed_models:
+                        continue
+                    
+                    # Skip if we already have this model
+                    if any(m.id == model_id for m in discovered_models):
+                        continue
+                    
                     discovered_models.append(DiscoveredModel(
                         id=model_id,
                         name=model.display_name if hasattr(model, 'display_name') else model_id,
@@ -275,33 +301,68 @@ class OpenRouterModelDiscovery(BaseModelDiscovery):
         try:
             import httpx
             
-            # Get available models from OpenRouter
+            # Get available models from OpenRouter with authentication
+            headers = {
+                "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+                "Content-Type": "application/json"
+            }
+            
             async with httpx.AsyncClient() as client:
-                response = await client.get("https://openrouter.ai/api/v1/models")
+                response = await client.get(
+                    "https://openrouter.ai/api/v1/models",
+                    headers=headers,
+                    timeout=10.0
+                )
                 response.raise_for_status()
                 models_data = response.json()
             
             discovered_models = []
             for model in models_data.get('data', []):
-                # Filter for models that support function calling and are reasonably popular
-                if model.get('architecture', {}).get('instruct_type') in ['chat', 'instruction'] and \
-                   model.get('context_length', 0) >= 4000:  # Reasonable context length
+                model_id = model.get('id', '')
+                supported_parameters = model.get('supported_parameters', [])
+                
+                # Only include models that support tools (function calling)
+                if model_id and supported_parameters and 'tools' in supported_parameters:
+                    # Handle pricing - convert string to float if needed
+                    pricing = model.get('pricing', {}).get('prompt')
+                    if pricing and isinstance(pricing, str):
+                        try:
+                            pricing = float(pricing)
+                        except (ValueError, TypeError):
+                            pricing = None
                     
                     discovered_models.append(DiscoveredModel(
-                        id=model['id'],
-                        name=model.get('name', model['id']),
+                        id=model_id,
+                        name=model.get('name', model_id),
                         provider="openrouter",
                         supports_function_calling=True,
                         supports_streaming=True,
                         context_length=model.get('context_length'),
                         description=model.get('description'),
-                        pricing_per_token=model.get('pricing', {}).get('prompt')
+                        pricing_per_token=pricing
                     ))
             
-            # Sort by popularity/pricing and take top 20
+            # Sort models for better organization (same as model command)
+            def sort_key(model):
+                model_id = model.id
+                if model_id.startswith("anthropic/claude"):
+                    return f"0_{model_id}"
+                elif model_id.startswith("openai/"):
+                    return f"1_{model_id}"
+                elif model_id.startswith("google/"):
+                    return f"2_{model_id}"
+                elif model_id.startswith("meta-llama/"):
+                    return f"3_{model_id}"
+                elif model_id.startswith("mistralai/"):
+                    return f"4_{model_id}"
+                else:
+                    return f"5_{model_id}"
+            
+            discovered_models.sort(key=sort_key)
+            
+            # Return tool-capable models (limit to reasonable number for menu)
             if discovered_models:
-                discovered_models.sort(key=lambda x: x.pricing_per_token or 999, reverse=False)
-                return discovered_models[:20]
+                return discovered_models[:25]  # Increased limit for more choice
             
         except Exception as e:
             logger.debug(f"OpenRouter API discovery failed: {e}")
@@ -317,6 +378,74 @@ class ClaudeModelDiscovery(BaseModelDiscovery):
         return self._get_fallback_models()
 
 
+class CopilotModelDiscovery(BaseModelDiscovery):
+    """GitHub Copilot model discovery."""
+    
+    async def _discover_models(self) -> List[DiscoveredModel]:
+        """Discover GitHub Copilot models via API."""
+        import os
+        
+        api_key = os.getenv("COPILOT_ACCESS_TOKEN")
+        if not api_key:
+            logger.debug("No COPILOT_ACCESS_TOKEN found, using fallback models")
+            return self._get_fallback_models()
+        
+        try:
+            import httpx
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # GitHub Copilot API endpoint for models
+                response = await client.get(
+                    "https://api.githubcopilot.com/models",
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    models = []
+                    
+                    # Parse GitHub Copilot models response
+                    if "data" in data:
+                        for model_info in data["data"]:
+                            model_id = model_info.get("id", "")
+                            name = model_info.get("name", model_id)
+                            
+                            # Only include models that support function calling
+                            if model_id and self._supports_function_calling(model_info):
+                                models.append(DiscoveredModel(
+                                    id=model_id,
+                                    name=name,
+                                    provider="copilot",
+                                    supports_function_calling=True,
+                                    supports_streaming=True,
+                                    context_length=model_info.get("context_length", 128000)
+                                ))
+                    
+                    if models:
+                        logger.debug(f"Discovered {len(models)} GitHub Copilot models")
+                        return models
+                        
+                else:
+                    logger.debug(f"GitHub Copilot API returned {response.status_code}")
+                    
+        except Exception as e:
+            logger.debug(f"GitHub Copilot API discovery failed: {e}")
+        
+        return self._get_fallback_models()
+    
+    def _supports_function_calling(self, model_info: dict) -> bool:
+        """Check if the model supports function calling."""
+        # GitHub Copilot typically supports function calling for GPT-4 and Claude models
+        model_id = model_info.get("id", "").lower()
+        return any(keyword in model_id for keyword in ["gpt-4", "claude", "sonnet"])
+
+
 class ModelDiscoveryService:
     """Central service for discovering models across all providers."""
     
@@ -327,6 +456,7 @@ class ModelDiscoveryService:
             "gemini": GeminiModelDiscovery("gemini"),
             "ollama": OllamaModelDiscovery("ollama"),
             "openrouter": OpenRouterModelDiscovery("openrouter"),
+            "copilot": CopilotModelDiscovery("copilot"),
         }
     
     async def discover_models(self, provider: str, use_cache: bool = True) -> List[DiscoveredModel]:

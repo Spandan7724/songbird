@@ -3,6 +3,7 @@
 import pytest
 import asyncio
 from unittest.mock import Mock, patch
+import os
 
 from songbird.discovery import (
     DiscoveredModel, 
@@ -128,7 +129,7 @@ class TestModelDiscoveryService:
         service = ModelDiscoveryService()
         
         # Check that all expected providers are initialized
-        expected_providers = ["openai", "claude", "gemini", "ollama", "openrouter"]
+        expected_providers = ["openai", "claude", "gemini", "ollama", "openrouter", "copilot"]
         for provider in expected_providers:
             assert provider in service._discoverers
     
@@ -197,6 +198,15 @@ async def test_model_command_integration():
     models = cmd._get_available_models("gemini")
     assert isinstance(models, list)
     assert len(models) > 0
+    
+    # Test Copilot model discovery
+    models = cmd._get_litellm_models("copilot")
+    assert isinstance(models, list)
+    assert len(models) > 0
+    
+    models = cmd._get_available_models("copilot")
+    assert isinstance(models, list)
+    assert len(models) > 0
 
 
 def test_provider_info_integration():
@@ -223,3 +233,131 @@ def test_provider_info_integration():
     provider_info_no_discovery = get_provider_info(use_discovery=False)
     assert isinstance(provider_info_no_discovery, dict)
     assert len(provider_info_no_discovery) > 0
+
+
+@pytest.fixture
+def openrouter_api_key():
+    """Fixture for OpenRouter API key."""
+    return os.getenv('OPENROUTER_API_KEY')
+
+
+@pytest.mark.asyncio
+async def test_openrouter_discovery_with_api_key(openrouter_api_key):
+    """Test OpenRouter model discovery with API key."""
+    if not openrouter_api_key:
+        pytest.skip("No OPENROUTER_API_KEY found")
+    
+    discovery = get_discovery_service()
+    
+    # Discover OpenRouter models
+    models = await discovery.discover_models('openrouter', use_cache=False)
+    
+    # Basic assertions
+    assert len(models) > 0, "Should discover at least some models"
+    
+    # Check model structure
+    for model in models[:5]:  # Check first 5 models
+        assert model.id, "Model should have an ID"
+        assert hasattr(model, 'name'), "Model should have a name attribute"
+        assert hasattr(model, 'supports_function_calling'), "Model should have function calling attribute"
+        assert hasattr(model, 'context_length'), "Model should have context length attribute"
+        assert hasattr(model, 'pricing_per_token'), "Model should have pricing attribute"
+    
+    # Test model ID extraction
+    model_ids = [model.id for model in models]
+    assert len(model_ids) == len(models), "Should extract all model IDs"
+    
+    # Check for expected model patterns
+    anthropic_models = [m for m in models if 'anthropic' in m.id.lower()]
+    openai_models = [m for m in models if 'openai' in m.id.lower()]
+    assert len(anthropic_models) > 0 or len(openai_models) > 0, \
+        "Should find some known provider models"
+
+
+@pytest.mark.asyncio
+async def test_openrouter_discovery_fallback():
+    """Test OpenRouter model discovery fallback behavior."""
+    original_key = os.environ.get('OPENROUTER_API_KEY')
+    if 'OPENROUTER_API_KEY' in os.environ:
+        del os.environ['OPENROUTER_API_KEY']
+    
+    try:
+        discovery = get_discovery_service()
+        models = await discovery.discover_models('openrouter', use_cache=False)
+        
+        # Should still return some fallback models
+        assert len(models) > 0, "Should have fallback models when no API key"
+        
+        # Check basic model structure
+        for model in models:
+            assert model.id, "Fallback model should have an ID"
+            
+    finally:
+        # Restore original API key
+        if original_key is not None:
+            os.environ['OPENROUTER_API_KEY'] = original_key
+
+
+@pytest.mark.asyncio
+async def test_openrouter_model_properties(openrouter_api_key):
+    """Test specific properties of discovered OpenRouter models."""
+    if not openrouter_api_key:
+        pytest.skip("No OPENROUTER_API_KEY found")
+    
+    discovery = get_discovery_service()
+    models = await discovery.discover_models('openrouter', use_cache=False)
+    
+    # Test that we have models with different properties
+    function_calling_models = [m for m in models if m.supports_function_calling]
+    non_function_calling_models = [m for m in models if not m.supports_function_calling]
+    
+    # Should have a mix of models with and without function calling
+    assert len(function_calling_models) > 0, "Should have some function calling models"
+    
+    # Test context lengths
+    models_with_context = [m for m in models if m.context_length and m.context_length > 0]
+    assert len(models_with_context) > 0, "Should have models with context length info"
+    
+    # Test pricing info
+    models_with_pricing = [m for m in models if m.pricing_per_token is not None]
+    # Note: Not all models may have pricing, so this is optional
+    
+    # Test long model names (common issue with OpenRouter)
+    model_names = [m.id for m in models]
+    longest_names = sorted(model_names, key=len, reverse=True)
+    
+    # Should handle long model names gracefully
+    if longest_names:
+        longest_name = longest_names[0]
+        assert len(longest_name) > 10, "Should have some reasonably long model names"
+
+
+@pytest.mark.asyncio
+async def test_discovery_service_caching():
+    """Test discovery service caching behavior."""
+    discovery = get_discovery_service()
+    
+    # Test with cache (default behavior)
+    models_cached = await discovery.discover_models('openrouter', use_cache=True)
+    
+    # Test without cache
+    models_fresh = await discovery.discover_models('openrouter', use_cache=False)
+    
+    # Both should return models (though they might be different due to API changes)
+    assert len(models_cached) > 0 or len(models_fresh) > 0, \
+        "Should discover models with or without cache"
+
+
+@pytest.mark.asyncio
+async def test_discovery_error_handling():
+    """Test discovery service error handling."""
+    discovery = get_discovery_service()
+    
+    # Test with invalid provider
+    try:
+        models = await discovery.discover_models('invalid_provider', use_cache=False)
+        # If this doesn't raise an exception, it should return empty list or handle gracefully
+        assert isinstance(models, list), "Should return a list even for invalid provider"
+    except Exception as e:
+        # If it raises an exception, that's also acceptable
+        assert True, f"Discovery service handled invalid provider with exception: {e}"

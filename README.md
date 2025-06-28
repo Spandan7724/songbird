@@ -52,7 +52,7 @@ pipx install songbird-ai
 # Visit: https://aistudio.google.com/app/apikey
 
 # Set your API key
-export GOOGLE_API_KEY="your-api-key-here"
+export GEMINI_API_KEY="your-api-key-here"
 
 # Start coding with AI
 songbird
@@ -64,7 +64,27 @@ songbird --continue
 songbird --resume
 ```
 
-### Option 2: With Local Ollama
+### Option 2: With GitHub Copilot
+
+```bash
+# Install Songbird
+pipx install songbird-ai
+
+# Get your GitHub Copilot access token from VS Code or JetBrains IDE
+# VS Code: Command Palette → "GitHub Copilot: Generate Access Token"
+# JetBrains: Settings → Tools → GitHub Copilot → Generate Token
+
+# Set your access token
+export COPILOT_ACCESS_TOKEN="your-copilot-token-here"
+
+# Start coding with GitHub Copilot
+songbird --provider copilot
+
+# Continue previous session with Copilot
+songbird --provider copilot --continue
+```
+
+### Option 3: With Local Ollama
 
 ```bash
 # Install Songbird
@@ -143,7 +163,7 @@ songbird --provider ollama --continue
 - **Session Management**: `/clear` command for conversation management
 
 ### **Multi-Provider AI Support**
-- **5 AI Providers**: OpenAI, Anthropic Claude, Google Gemini, Ollama, and OpenRouter
+- **6 AI Providers**: OpenAI, Anthropic Claude, Google Gemini, GitHub Copilot, Ollama, and OpenRouter
 - **Automatic Provider Selection**: Intelligent fallback based on available API keys
 - **Cloud & Local**: Use powerful cloud models or private local models
 - **Dynamic Switching**: Switch models and providers instantly during conversations
@@ -253,6 +273,8 @@ songbird --help
 songbird version
 ```
 
+For detailed setup instructions, model comparisons, and troubleshooting for all providers, see the **[Complete Provider Guide](docs/providers.md)**.
+
 ## Usage Examples
 
 ```bash
@@ -261,6 +283,9 @@ songbird
 
 # Use Gemini (powerful, cloud-based)
 songbird --provider gemini
+
+# Use GitHub Copilot (subscription-based)
+songbird --provider copilot
 
 # Use Ollama (private, local)
 songbird --provider ollama
@@ -355,7 +380,7 @@ uv tool install ./dist/songbird_ai-*.whl
 
 Songbird follows a **test-driven, phase-based development** approach:
 
-- [x] **Phase 1**: LLM Provider Layer (OpenAI, Claude, Gemini, Ollama, OpenRouter)
+- [x] **Phase 1**: LLM Provider Layer (OpenAI, Claude, Gemini, GitHub Copilot, Ollama, OpenRouter)
 - [x] **Phase 2**: File Search (enhanced with type filtering and smart detection)
 - [x] **Phase 3**: Patch Generation & Apply (with beautiful diff previews)
 - [x] **Phase 4**: Shell Execution (live streaming and cross-platform)
@@ -406,17 +431,45 @@ ollama list
 
 ```bash
 # Check if API key is set
-echo $GOOGLE_API_KEY
+echo $GEMINI_API_KEY
 
 # Get a free API key
 # Visit: https://aistudio.google.com/app/apikey
 
 # Set API key permanently
-echo 'export GOOGLE_API_KEY="your-key-here"' >> ~/.bashrc
+echo 'export GEMINI_API_KEY="your-key-here"' >> ~/.bashrc
 source ~/.bashrc
 
 # Test Gemini provider
 songbird --provider gemini
+```
+</details>
+
+<details>
+<summary>GitHub Copilot Issues</summary>
+
+```bash
+# Check if access token is set
+echo $COPILOT_ACCESS_TOKEN
+
+# Get access token from VS Code
+# Command Palette → "GitHub Copilot: Generate Access Token"
+
+# Get access token from JetBrains IDE
+# Settings → Tools → GitHub Copilot → Generate Token
+
+# Set token temporarily
+export COPILOT_ACCESS_TOKEN="ghu_xxxxxxxxxxxxxxxxxxxx"
+
+# Set token permanently
+echo 'export COPILOT_ACCESS_TOKEN="your-token-here"' >> ~/.bashrc
+source ~/.bashrc
+
+# Test Copilot provider
+songbird --provider copilot
+
+# Check available models
+songbird --provider copilot --list-providers
 ```
 </details>
 

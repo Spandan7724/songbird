@@ -7,7 +7,8 @@ openai = "openai/gpt-4o"
 claude = "anthropic/claude-3-5-sonnet-20241022"
 gemini = "gemini/gemini-2.0-flash-001"
 ollama = "ollama/qwen2.5-coder:7b"
-openrouter = "anthropic/claude-3.5-sonnet"
+openrouter = "deepseek/deepseek-chat-v3-0324:free"
+copilot = "gpt-4o"
 
 [urls]
 # Custom API base URLs for providers that need them
@@ -34,9 +35,9 @@ ollama = "http://localhost:11434"
 
 [models.gemini]
 "gemini-2.0-flash-001" = "gemini/gemini-2.0-flash-001"
-"gemini-1.5-pro" = "gemini/gemini-1.5-pro"
+"gemini-2.0-flash" = "gemini/gemini-2.0-flash"
 "gemini-1.5-flash" = "gemini/gemini-1.5-flash"
-"gemini-1.0-pro" = "gemini/gemini-1.0-pro"
+"gemini-2.0-flash-exp" = "gemini/gemini-2.0-flash-exp"
 
 [models.ollama]
 # Note: Ollama models are dynamic and discovered at runtime
@@ -51,14 +52,29 @@ ollama = "http://localhost:11434"
 "mistral:latest" = "ollama/mistral:latest"
 
 [models.openrouter]
-# OpenRouter models with tool calling support
+# OpenRouter models with tool calling support (dynamic discovery preferred)
 "anthropic/claude-3.5-sonnet" = "anthropic/claude-3.5-sonnet"
 "openai/gpt-4o" = "openai/gpt-4o"
 "openai/gpt-4o-mini" = "openai/gpt-4o-mini"
-"google/gemini-2.0-flash-001" = "google/gemini-2.0-flash-001"
 "deepseek/deepseek-chat-v3-0324:free" = "deepseek/deepseek-chat-v3-0324:free"
 "meta-llama/llama-3.2-90b-vision-instruct" = "meta-llama/llama-3.2-90b-vision-instruct"
 "mistralai/mistral-large-2407" = "mistralai/mistral-large-2407"
+
+[models.copilot]
+# GitHub Copilot models (using custom provider)
+"gpt-4o" = "gpt-4o"
+"gpt-4o-mini" = "gpt-4o-mini"
+"gpt-4" = "gpt-4"
+"gpt-4-turbo" = "gpt-4-turbo"
+"claude-3.5-sonnet" = "claude-3.5-sonnet"
+"claude-3.5-haiku" = "claude-3.5-haiku"
+"claude-3-opus" = "claude-3-opus"
+"claude-3-sonnet" = "claude-3-sonnet"
+"claude-3-haiku" = "claude-3-haiku"
+"gemini-1.5-pro" = "gemini-1.5-pro"
+"gemini-1.5-flash" = "gemini-1.5-flash"
+"o1-preview" = "o1-preview"
+"o1-mini" = "o1-mini"
 
 # Provider-specific configuration
 [provider_config.openai]
@@ -90,3 +106,9 @@ supports_function_calling = true
 supports_streaming = true
 requires_api_key = true
 api_key_env_var = "OPENROUTER_API_KEY"
+
+[provider_config.copilot]
+supports_function_calling = true
+supports_streaming = true
+requires_api_key = true
+api_key_env_var = "COPILOT_ACCESS_TOKEN"

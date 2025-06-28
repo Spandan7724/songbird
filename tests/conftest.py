@@ -38,7 +38,7 @@ def clean_environment():
     
     # Clear API keys to test fallback behavior
     api_keys = [
-        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", 
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", 
         "OPENROUTER_API_KEY", "SONGBIRD_DEBUG_TOOLS"
     ]
     

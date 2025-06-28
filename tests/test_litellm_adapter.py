@@ -15,10 +15,11 @@ import pytest
 import asyncio
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from songbird.llm.litellm_adapter import (
-    LiteLLMAdapter, create_litellm_provider,
+    LiteLLMAdapter,
     LiteLLMError, LiteLLMConnectionError, LiteLLMAuthenticationError,
     LiteLLMRateLimitError, LiteLLMModelError
 )
+from songbird.llm.providers import create_litellm_provider
 from songbird.llm.types import ChatResponse
 
 

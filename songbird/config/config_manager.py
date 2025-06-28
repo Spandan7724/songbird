@@ -15,7 +15,7 @@ class LLMConfig:
     default_models: Dict[str, str] = field(default_factory=lambda: {
         "openai": "gpt-4o",
         "claude": "claude-3-5-sonnet-20241022", 
-        "gemini": "gemini-2.0-flash-001",
+        "gemini": "gemini-2.0-flash",
         "ollama": "qwen2.5-coder:7b",
         "openrouter": "deepseek/deepseek-chat-v3-0324:free"
     })
@@ -245,7 +245,7 @@ class ConfigManager:
         return {
             "openai": os.getenv("OPENAI_API_KEY"),
             "claude": os.getenv("ANTHROPIC_API_KEY"),
-            "gemini": os.getenv("GOOGLE_API_KEY"),
+            "gemini": os.getenv("GEMINI_API_KEY"),
             "openrouter": os.getenv("OPENROUTER_API_KEY"),
             "ollama": None  # Local, no API key needed
         }

@@ -29,7 +29,7 @@ load_env_file()
 
 # Skip these tests if no API keys are available
 def has_gemini_key():
-    return os.getenv("GOOGLE_API_KEY") is not None
+    return os.getenv("GEMINI_API_KEY") is not None
 
 def has_openrouter_key():
     return os.getenv("OPENROUTER_API_KEY") is not None
@@ -44,7 +44,7 @@ def has_ollama_available():
         return False
 
 
-@pytest.mark.skipif(not has_gemini_key(), reason="No GOOGLE_API_KEY available")
+@pytest.mark.skipif(not has_gemini_key(), reason="No GEMINI_API_KEY available")
 class TestGeminiProvider:
     """Test Gemini provider with real API."""
     

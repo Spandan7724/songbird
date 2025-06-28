@@ -66,6 +66,9 @@ def validate_mapping_config(config_data: Dict[str, Any]) -> List[str]:
     """Validate provider mapping configuration and return list of issues."""
     issues = []
     
+    # Most providers use standard provider/model format
+    # Special cases: OpenRouter (nested), Ollama (no prefix), Copilot (custom)
+    
     # Check required sections
     if "defaults" not in config_data:
         issues.append("Missing 'defaults' section in configuration")
@@ -78,7 +81,7 @@ def validate_mapping_config(config_data: Dict[str, Any]) -> List[str]:
     for provider, model_string in defaults.items():
         if not isinstance(model_string, str):
             issues.append(f"Default model for '{provider}' must be a string, got {type(model_string)}")
-        elif "/" not in model_string:
+        elif _should_validate_provider_format(provider, model_string):
             issues.append(f"Default model for '{provider}' should use LiteLLM format 'provider/model': {model_string}")
     
     # Validate models section
@@ -91,7 +94,7 @@ def validate_mapping_config(config_data: Dict[str, Any]) -> List[str]:
         for model, model_string in provider_models.items():
             if not isinstance(model_string, str):
                 issues.append(f"Model mapping '{provider}.{model}' must be a string")
-            elif "/" not in model_string:
+            elif _should_validate_provider_format(provider, model_string):
                 issues.append(f"Model mapping '{provider}.{model}' should use LiteLLM format: {model_string}")
     
     # Validate URLs section if present
@@ -103,6 +106,20 @@ def validate_mapping_config(config_data: Dict[str, Any]) -> List[str]:
             issues.append(f"URL for provider '{provider}' should start with http:// or https://: {url}")
     
     return issues
+
+
+def _should_validate_provider_format(provider: str, model_string: str) -> bool:
+    """Check if a model string should be validated for provider/model format."""
+    # Copilot uses custom provider, no validation needed
+    if provider == "copilot":
+        return False
+    
+    # OpenRouter and Ollama have special format rules
+    if provider in {"openrouter", "ollama"}:
+        return False
+    
+    # For all other providers (openai, claude, gemini), require provider/model format
+    return "/" not in model_string
 
 
 def load_provider_mapping() -> MappingConfig:

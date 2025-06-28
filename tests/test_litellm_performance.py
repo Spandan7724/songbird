@@ -1,18 +1,23 @@
 # tests/test_litellm_performance.py
 """
-Performance and latency tests for LiteLLM adapter.
+Performance tests for LiteLLM adapter with various providers.
 
-Tests streaming latency, throughput, resource management, and regression analysis
-to ensure LiteLLM adapter meets or exceeds legacy provider performance.
+Tests response times, throughput, memory usage, and resource cleanup
+across different providers and model configurations.
 """
-import pytest
+
 import asyncio
 import time
-import gc
+import pytest
 import psutil
 import os
+import gc
+from typing import List, Dict, Any
 from unittest.mock import Mock, patch, AsyncMock
-from songbird.llm.litellm_adapter import LiteLLMAdapter, create_litellm_provider
+
+from songbird.llm.litellm_adapter import LiteLLMAdapter
+from songbird.llm.providers import create_litellm_provider
+from songbird.llm.types import ChatResponse
 
 
 @pytest.mark.slow

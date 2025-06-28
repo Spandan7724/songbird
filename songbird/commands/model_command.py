@@ -86,7 +86,7 @@ class ModelCommand(BaseCommand):
                             orchestrator.session_manager.save_session(orchestrator.session)
                     return CommandResult(
                         success=True,
-                        message=f"Switched to model: {new_model} (LiteLLM: {resolved_model})",
+                        message=f"Switched to model: {new_model}",
                         data={"new_model": new_model}
                     )
                 else:
@@ -174,7 +174,7 @@ class ModelCommand(BaseCommand):
             
             return CommandResult(
                 success=True,
-                message=f"Switched to model: {selected_model} (LiteLLM: {resolved_model})",
+                message=f"Switched to model: {selected_model}",
                 data={"new_model": selected_model}
             )
         else:
@@ -190,21 +190,38 @@ class ModelCommand(BaseCommand):
 
     def _get_available_models(self, provider_name: str) -> List[str]:
         """Get available models for a provider using dynamic discovery."""
+        # Special handling for Copilot since it's a custom provider
+        if provider_name == "copilot":
+            return self._get_copilot_models()
+        
         try:
-            # Try dynamic discovery first
+            # Try dynamic discovery first for LiteLLM providers
             from ..llm.providers import get_models_for_provider
             import asyncio
             
-            # Run model discovery
+            # Run model discovery with proper async handling
             def run_discovery():
                 try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    return loop.run_until_complete(get_models_for_provider(provider_name, use_cache=True))
-                except Exception:
+                    # Check if we're already in an event loop
+                    try:
+                        loop = asyncio.get_running_loop()
+                        # We're in an event loop, use ThreadPoolExecutor
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(asyncio.run, get_models_for_provider(provider_name, use_cache=True))
+                            return future.result(timeout=10)
+                    except RuntimeError:
+                        # No event loop running, safe to create one
+                        return asyncio.run(get_models_for_provider(provider_name, use_cache=True))
+                except Exception as e:
+                    # Provide more specific error information
+                    if "Cannot run the event loop while another loop is running" in str(e):
+                        self.console.print(f"[yellow]Discovery failed: Event loop conflict - using fallback models[/yellow]")
+                    elif "timeout" in str(e).lower():
+                        self.console.print(f"[yellow]Discovery failed: Network timeout - using fallback models[/yellow]")
+                    else:
+                        self.console.print(f"[yellow]Discovery failed: {e}[/yellow]")
                     return []
-                finally:
-                    loop.close()
             
             discovered_models = run_discovery()
             
@@ -223,8 +240,8 @@ class ModelCommand(BaseCommand):
             return self._get_ollama_models()
         elif provider_name == "gemini":
             return [
-                "gemini-2.0-flash-001",
-                "gemini-1.5-pro",
+                "gemini-2.0-flash",
+                "gemini-1.5-pro", 
                 "gemini-1.5-flash",
                 "gemini-1.0-pro"
             ]
@@ -240,6 +257,12 @@ class ModelCommand(BaseCommand):
             ]
         elif provider_name == "openrouter":
             return self._get_openrouter_models()
+        elif provider_name == "copilot":
+            return [
+                "gpt-4o",
+                "gpt-4o-mini", 
+                "claude-3.5-sonnet"
+            ]
         else:
             return []
 
@@ -377,13 +400,13 @@ class ModelCommand(BaseCommand):
                 if tool_capable_models:
                     return tool_capable_models
                 else:
-                    print("No tool-capable models found in OpenRouter API")
+                    self.console.print("[yellow]No tool-capable models found in OpenRouter API[/yellow]")
                     
             else:
-                print(f"OpenRouter API error: {response.status_code}")
+                self.console.print(f"[yellow]OpenRouter API error: {response.status_code}[/yellow]")
                 
         except Exception as e:
-            print(f"Error fetching OpenRouter models: {e}")
+            self.console.print(f"[yellow]Error fetching OpenRouter models: {e}[/yellow]")
         
         # Return fallback models on any error - known tool-capable models
         return [
@@ -402,21 +425,38 @@ class ModelCommand(BaseCommand):
     
     def _get_litellm_models(self, provider_name: str) -> List[str]:
         """Get available models for LiteLLM provider using dynamic discovery."""
+        # Special handling for Copilot since it uses a custom provider
+        if provider_name == "copilot":
+            return self._get_copilot_models()
+        
         try:
             # Try dynamic discovery first
             from ..llm.providers import get_models_for_provider
             import asyncio
             
-            # Run model discovery
+            # Run model discovery with proper async handling
             def run_discovery():
                 try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    return loop.run_until_complete(get_models_for_provider(provider_name, use_cache=True))
-                except Exception:
+                    # Check if we're already in an event loop
+                    try:
+                        loop = asyncio.get_running_loop()
+                        # We're in an event loop, use ThreadPoolExecutor
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(asyncio.run, get_models_for_provider(provider_name, use_cache=True))
+                            return future.result(timeout=10)
+                    except RuntimeError:
+                        # No event loop running, safe to create one
+                        return asyncio.run(get_models_for_provider(provider_name, use_cache=True))
+                except Exception as e:
+                    # Provide more specific error information
+                    if "Cannot run the event loop while another loop is running" in str(e):
+                        self.console.print(f"[yellow]Discovery failed: Event loop conflict - using fallback models[/yellow]")
+                    elif "timeout" in str(e).lower():
+                        self.console.print(f"[yellow]Discovery failed: Network timeout - using fallback models[/yellow]")
+                    else:
+                        self.console.print(f"[yellow]Discovery failed: {e}[/yellow]")
                     return []
-                finally:
-                    loop.close()
             
             discovered_models = run_discovery()
             
@@ -459,14 +499,75 @@ class ModelCommand(BaseCommand):
         fallback_models = {
             "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
             "claude": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
-            "gemini": ["gemini-2.0-flash-001", "gemini-1.5-pro", "gemini-1.5-flash"],
+            "gemini": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-exp"],
             "ollama": ["qwen2.5-coder:7b", "llama3.2:latest", "codellama:latest"],
-            "openrouter": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o", "deepseek/deepseek-chat-v3-0324:free"]
+            "openrouter": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o", "deepseek/deepseek-chat-v3-0324:free"],
+            "copilot": ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
         }
         return fallback_models.get(provider_name, [])
     
+    def _get_copilot_models(self) -> List[str]:
+        """Get available GitHub Copilot models using the custom provider with API discovery."""
+        try:
+            from ..llm.providers import get_copilot_provider
+            import asyncio
+            
+            provider = get_copilot_provider()
+            
+            # Use async model discovery to get the full list from API
+            def run_async_discovery():
+                try:
+                    # Check if we're already in an event loop
+                    try:
+                        loop = asyncio.get_running_loop()
+                        # We're in an event loop, use ThreadPoolExecutor
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(asyncio.run, provider.get_models())
+                            models_data = future.result(timeout=10)
+                            # Extract model IDs from the API response
+                            return [model.get("id", "") for model in models_data if model.get("id")]
+                    except RuntimeError:
+                        # No event loop running, safe to create one
+                        models_data = asyncio.run(provider.get_models())
+                        # Extract model IDs from the API response
+                        return [model.get("id", "") for model in models_data if model.get("id")]
+                except Exception as discovery_error:
+                    # Provide more specific error information for Copilot
+                    if "Cannot run the event loop while another loop is running" in str(discovery_error):
+                        self.console.print(f"[yellow]API discovery failed: Event loop conflict - using fallback models[/yellow]")
+                    elif "timeout" in str(discovery_error).lower():
+                        self.console.print(f"[yellow]API discovery failed: Network timeout - using fallback models[/yellow]")
+                    elif "401" in str(discovery_error) or "403" in str(discovery_error):
+                        self.console.print(f"[yellow]API discovery failed: Authentication error - check COPILOT_ACCESS_TOKEN[/yellow]")
+                    else:
+                        self.console.print(f"[yellow]API discovery failed: {discovery_error}[/yellow]")
+                    # Fall back to static available models (sync method)
+                    try:
+                        return provider.get_available_models()
+                    except Exception:
+                        return ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
+            
+            discovered_models = run_async_discovery()
+            
+            if discovered_models:
+                self.console.print(f"[dim]Found {len(discovered_models)} Copilot models via API discovery[/dim]")
+                return discovered_models
+            else:
+                # Ultimate fallback
+                return ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
+                
+        except Exception as e:
+            self.console.print(f"[yellow]Could not get Copilot models: {e}[/yellow]")
+            # Return fallback models
+            return ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
+    
     def _resolve_litellm_model(self, provider_name: str, model_name: str) -> str:
         """Resolve a model name to LiteLLM model string with fallback warnings."""
+        # Special handling for Copilot since it uses a custom provider
+        if provider_name == "copilot":
+            return model_name  # Copilot uses model names directly, not LiteLLM format
+        
         try:
             from ..config import load_provider_mapping
             config = load_provider_mapping()

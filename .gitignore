@@ -38,7 +38,6 @@ COMPLETION_SUMMARY.md
 CHANGELOG.md
 GEMINI.md
 LITELLM_IMPLEMENTATION_PLAN.md
-LITELLM_MIGRATION_GUIDE.md
 songbird.egg-info/
 songbird/__pycache__/
 tests/__pycache__
@@ -48,3 +47,4 @@ repomix-output.xml
 .claude/
 test_scripts/
 songbird/llm/__pycache__/
+.aider*

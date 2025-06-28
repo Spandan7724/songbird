@@ -6,6 +6,7 @@ import logging
 from rich.console import Console
 
 from .types import ChatResponse
+from .copilot_provider import CopilotProvider
 
 # LiteLLM availability check
 try:
@@ -43,31 +44,43 @@ def create_litellm_provider(provider_name: str, model: str = None, api_base: str
     # Load configuration
     config = load_provider_mapping()
     
-    # Determine model string
-    if model:
-        # If model provided, use it directly or map it
-        if "/" in model:
-            # Already in LiteLLM format
-            model_string = model
-        else:
-            # Try to map from provider models
-            model_string = config.get_model_mapping(provider_name, model)
-            if not model_string:
-                # Fallback: construct LiteLLM format
-                model_string = f"{provider_name}/{model}"
-    else:
-        # Use default model for provider
-        model_string = config.get_default_model(provider_name)
-        if not model_string:
-            raise ValueError(f"No default model configured for provider '{provider_name}'")
+    # If a model is provided, use it directly. Otherwise, get the default.
+    model_to_use = model or config.get_default_model(provider_name)
+    
+    # Handle API base URL priority
+    effective_api_base = api_base or config.get_api_base(provider_name)
     
     # Create adapter with optional API base override
-    adapter = LiteLLMAdapter(model_string, api_base=api_base, **kwargs)
+    adapter = LiteLLMAdapter(
+        provider_name=provider_name,  # Pass provider name to ensure correct prefix
+        model=model_to_use,
+        api_base=effective_api_base,
+        **kwargs
+    )
     return adapter
 
 
+def get_copilot_provider(model: str = None, **kwargs):
+    """Create a custom GitHub Copilot provider instance."""
+    if not model:
+        model = "gpt-4o"  # Default model for Copilot
+    
+    try:
+        provider = CopilotProvider(model=model, **kwargs)
+        console.print(f"✓ COPILOT_ACCESS_TOKEN configured: {os.getenv('COPILOT_ACCESS_TOKEN', 'Not set')[:10]}...{os.getenv('COPILOT_ACCESS_TOKEN', '')[-4:] if os.getenv('COPILOT_ACCESS_TOKEN') else ''}")
+        console.print(f"GitHub Copilot provider initialized: {model}")
+        return provider
+    except Exception as e:
+        console.print(f"[red]Failed to initialize GitHub Copilot provider: {e}[/red]")
+        raise e
+
+
 def get_litellm_provider(provider_name: str, model: str = None, api_base: str = None, **kwargs):
-    """Get a LiteLLM provider with fallback to legacy providers."""
+    """Get a LiteLLM provider with special handling for Copilot and fallback to legacy providers."""
+    # Special handling for GitHub Copilot
+    if provider_name == "copilot":
+        return get_copilot_provider(model, **kwargs)
+    
     try:
         if LITELLM_AVAILABLE:
             return create_litellm_provider(provider_name, model, api_base, **kwargs)
@@ -97,7 +110,7 @@ def get_provider(name: str, use_litellm: bool = True) -> BaseProvider:
 def get_default_provider_name():
     """Get the default provider name based on available API keys and configuration."""
     # Priority order for auto-selection
-    providers_priority = ["gemini", "claude", "openai", "openrouter", "ollama"]
+    providers_priority = ["gemini", "claude", "openai", "copilot", "openrouter", "ollama"]
     
     for provider in providers_priority:
         try:
@@ -107,6 +120,8 @@ def get_default_provider_name():
                 return "claude"
             elif provider == "openai" and os.getenv("OPENAI_API_KEY"):
                 return "openai"
+            elif provider == "copilot" and os.getenv("COPILOT_ACCESS_TOKEN"):
+                return "copilot"
             elif provider == "openrouter" and os.getenv("OPENROUTER_API_KEY"):
                 return "openrouter"
             elif provider == "ollama":
@@ -179,6 +194,10 @@ def get_provider_info(use_discovery: bool = True) -> Dict[str, Dict[str, Any]]:
         "ollama": {
             "api_key_env": None,
             "fallback_models": ["qwen2.5-coder:7b", "devstral:latest", "llama3.2:latest"]
+        },
+        "copilot": {
+            "api_key_env": "COPILOT_ACCESS_TOKEN",
+            "fallback_models": ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
         }
     }
     
@@ -260,7 +279,8 @@ async def get_models_for_provider(provider_name: str, use_cache: bool = True) ->
                 "claude": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
                 "gemini": ["gemini-2.0-flash-001", "gemini-1.5-pro", "gemini-1.5-flash"],
                 "openrouter": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o", "meta-llama/llama-3.2-90b-vision-instruct"],
-                "ollama": ["qwen2.5-coder:7b", "devstral:latest", "llama3.2:latest"]
+                "ollama": ["qwen2.5-coder:7b", "devstral:latest", "llama3.2:latest"],
+                "copilot": ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
             }
             return fallback_models.get(provider_name, [])
             
