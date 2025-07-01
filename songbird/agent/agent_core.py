@@ -7,6 +7,8 @@ import logging
 from typing import Any, Dict, List, Optional, Protocol
 from datetime import datetime
 
+from rich.text import Text
+
 from ..llm.providers import BaseProvider
 from ..ui.data_transfer import UIMessage, AgentOutput, MessageType
 from ..memory.models import Session, Message
@@ -15,6 +17,7 @@ from ..tools.todo_tools import auto_complete_todos_from_message
 from .planning import AgentPlan, PlanStep, PlanStatus
 from .plan_manager import PlanManager
 from ..config.config_manager import get_config
+from .message_classifier import MessageClassifier
 
 # Configure logger for agent core
 logger = logging.getLogger(__name__)
@@ -49,6 +52,7 @@ class AgentCore:
         self.conversation_history: List[Dict[str, Any]] = []
         self.current_plan: Optional[AgentPlan] = None
         self.plan_manager = PlanManager()
+        self.message_classifier = MessageClassifier(self.provider)
         
         # Load system prompt from centralized prompts
         from ..prompts import get_core_system_prompt
@@ -57,18 +61,49 @@ class AgentCore:
     async def handle_message(self, user_message: str) -> AgentOutput:
         """Handle a user message and return appropriate output."""
         try:
-            # Auto-complete todos if we have a session
-            if self.session:
-                completed_ids = await auto_complete_todos_from_message(
-                    user_message, self.session.id, self.provider
-                )
-                if completed_ids:
-                    # Show updated todo list when todos are auto-completed
-                    from ..tools.todo_tools import todo_read
-                    await todo_read(session_id=self.session.id, show_completed=True)
-                
-                # Auto-create todos for complex requests 
-                await self._auto_create_todos_if_needed(user_message)
+            # Check configuration to see if we should run auto-todo features
+            from ..tools.semantic_config import get_semantic_config
+            config = get_semantic_config()
+            
+            # Auto-complete and auto-create todos if enabled and we have a session
+            if self.session and not config.fast_mode:
+                if config.parallel_llm_calls:
+                    # Run auto-completion and auto-creation in parallel
+                    tasks = []
+                    if config.enable_auto_todo_completion:
+                        tasks.append(auto_complete_todos_from_message(
+                            user_message, self.session.id, self.provider
+                        ))
+                    
+                    # Run the tasks in parallel
+                    if tasks:
+                        results = await asyncio.gather(*tasks, return_exceptions=True)
+                        
+                        # Handle auto-completion results
+                        if config.enable_auto_todo_completion and len(results) > 0:
+                            completed_ids = results[0] if not isinstance(results[0], Exception) else []
+                            if completed_ids:
+                                # Show updated todo list when todos are auto-completed
+                                from ..tools.todo_tools import todo_read
+                                await todo_read(session_id=self.session.id, show_completed=True)
+                    
+                    # Auto-create todos after completion check (needs to be sequential)
+                    if config.enable_auto_todo_creation:
+                        await self._auto_create_todos_if_needed(user_message)
+                else:
+                    # Sequential execution (original behavior)
+                    if config.enable_auto_todo_completion:
+                        completed_ids = await auto_complete_todos_from_message(
+                            user_message, self.session.id, self.provider
+                        )
+                        if completed_ids:
+                            # Show updated todo list when todos are auto-completed
+                            from ..tools.todo_tools import todo_read
+                            await todo_read(session_id=self.session.id, show_completed=True)
+                    
+                    # Auto-create todos for complex requests 
+                    if config.enable_auto_todo_creation:
+                        await self._auto_create_todos_if_needed(user_message)
             
             # Add user message to history
             self.conversation_history.append({
@@ -546,9 +581,11 @@ Remember to follow the plan systematically. Complete the current step before mov
         
         # Add tool results
         for tool_result in tool_results:
+            # Sanitize tool result before JSON serialization
+            sanitized_result = self._sanitize_for_json(tool_result["result"])
             self.conversation_history.append({
                 "role": "tool",
-                "content": json.dumps(tool_result["result"], indent=2),
+                "content": json.dumps(sanitized_result, indent=2),
                 "tool_call_id": tool_result["tool_call_id"],
                 "name": tool_result["function_name"]
             })
@@ -564,9 +601,11 @@ Remember to follow the plan systematically. Complete the current step before mov
             
             # Add tool results as separate messages
             for tool_result in tool_results:
+                # Sanitize tool result before JSON serialization
+                sanitized_result = self._sanitize_for_json(tool_result["result"])
                 tool_msg = Message(
                     role="tool",
-                    content=json.dumps(tool_result["result"], indent=2),
+                    content=json.dumps(sanitized_result, indent=2),
                     tool_call_id=tool_result["tool_call_id"],
                     name=tool_result["function_name"]
                 )
@@ -640,67 +679,101 @@ Remember to follow the plan systematically. Complete the current step before mov
         if not self.session:
             return
         
-        # Check if this looks like a complex, multi-step request
-        message_lower = user_message.lower()
+        # Check configuration
+        from ..tools.semantic_config import get_semantic_config
+        config = get_semantic_config()
         
-        # Patterns that indicate complex tasks
-        complex_indicators = [
-            # Direct requests for multi-step work
-            'refactor', 'implement', 'create', 'build', 'develop',
-            'add authentication', 'add auth', 'add login',
-            'set up', 'setup', 'configure',
-            'migrate', 'upgrade', 'update',
-            'optimize', 'improve performance',
-            'debug', 'troubleshoot', 'investigate',
-            # Multi-part requests
-            'and', 'then', 'also', 'plus',
-            # Planning language
-            'plan', 'design', 'architecture',
-            'steps', 'process', 'workflow',
-            # Size indicators
-            'entire', 'whole', 'complete', 'full',
-            'system', 'application', 'project'
-        ]
+        # Skip if disabled or in fast mode
+        if not config.enable_auto_todo_creation or config.fast_mode:
+            return
         
-        # Check if message contains complexity indicators
-        has_complexity_indicators = any(indicator in message_lower for indicator in complex_indicators)
+        # Quick check: skip very short messages
+        if len(user_message.split()) < config.auto_todo_min_words:
+            return
         
-        # Check message length (longer messages often indicate complex requests)
-        is_substantial_request = len(user_message.split()) > 10
-        
-        # Check for explicit multi-step language
-        has_multi_step_language = any(phrase in message_lower for phrase in [
-            'step by step', 'one by one', 'first', 'then', 'next', 'finally',
-            'phase', 'stage', 'part', 'section'
-        ])
-        
-        # Only auto-create todos if this looks like a complex request
-        if has_complexity_indicators or (is_substantial_request and has_multi_step_language):
-            try:
+        # Use LLM-based classification to determine if auto-creation is appropriate
+        try:
+            # Get existing todos for context
+            from ..tools.todo_manager import TodoManager
+            todo_manager = TodoManager(session_id=self.session.id)
+            existing_todos = todo_manager.get_current_session_todos()
+            
+            # Build context for classifier
+            context = {
+                'existing_todos_count': len(existing_todos),
+                'recent_auto_creation': self._check_recent_auto_creation(),
+                'conversation_length': len(self.conversation_history)
+            }
+            
+            # Classify the message using LLM
+            intent = await self.message_classifier.classify_message(user_message, context)
+            
+            # Auto-create todos based on LLM classification
+            from ..tools.semantic_config import get_semantic_config
+            config = get_semantic_config()
+            if intent.should_auto_create_todos and intent.confidence > config.llm_confidence_threshold:
                 # Use LLM to generate appropriate todos for this request
-                todos = await self._generate_todos_for_request(user_message)
+                todos = await self._generate_todos_for_request(user_message, existing_todos)
                 
                 if todos:
+                    # Limit the number of todos created
+                    limited_todos = todos[:config.auto_todo_max_per_message]
+                    
                     from ..tools.todo_tools import todo_write
-                    await todo_write(todos, session_id=self.session.id)
+                    await todo_write(limited_todos, session_id=self.session.id, llm_provider=self.provider)
                     
                     # Show a subtle message that todos were created
                     from rich.console import Console
                     console = Console()
-                    console.print(f"[dim]Created {len(todos)} todos for this task[/dim]")
-                    
-            except Exception:
-                # Silently fail if todo generation doesn't work
-                pass
+                    console.print(f"[dim]Created {len(limited_todos)} todos for this task[/dim]")
+                
+        except Exception:
+            # Silently fail if todo generation doesn't work
+            pass
     
-    async def _generate_todos_for_request(self, user_message: str) -> List[Dict[str, Any]]:
+    def _check_recent_auto_creation(self) -> bool:
+        """
+        Check if we recently auto-created todos in this conversation.
+        Returns True if we should skip auto-creation due to recent activity.
+        """
+        if not self.conversation_history:
+            return False
+        
+        # Look at the last few messages to see if we recently created todos
+        recent_messages = self.conversation_history[-6:]  # Last 3 turns (user + assistant)
+        
+        for message in recent_messages:
+            if message.get('role') == 'assistant':
+                content = message.get('content', '')
+                # Check if this message indicates recent todo creation
+                if 'Created' in content and 'todos' in content:
+                    return True
+        
+        return False
+    
+    async def _generate_todos_for_request(self, user_message: str, existing_todos: List = None) -> List[Dict[str, Any]]:
         """
         Use LLM to generate appropriate todos for a complex request.
         Returns list of todo dictionaries with semantic IDs.
         """
+        existing_todos = existing_todos or []
+        
+        # Build existing todos context
+        existing_context = ""
+        if existing_todos:
+            existing_list = []
+            for todo in existing_todos:
+                existing_list.append(f'- {todo.content} (status: {todo.status})')
+            existing_context = f"""
+
+EXISTING TODOS IN THIS SESSION:
+{chr(10).join(existing_list)}
+
+IMPORTANT: Do NOT create todos that are similar to or duplicate the existing ones above. Focus on different aspects or complementary tasks."""
+        
         # Create a focused prompt for todo generation
         prompt = f"""
-Given this user request: "{user_message}"
+Given this user request: "{user_message}"{existing_context}
 
 Generate 3-7 specific, actionable todos to complete this request.
 
@@ -709,6 +782,7 @@ Rules:
 2. Break down the request into logical steps
 3. Include appropriate priorities (high/medium/low)
 4. Make each todo specific and actionable
+5. Avoid duplicating or overlapping with existing todos listed above
 
 Return ONLY a JSON array in this format:
 [
@@ -746,3 +820,20 @@ Return ONLY a JSON array in this format:
             pass
         
         return []  # Return empty list if generation fails
+    
+    def _sanitize_for_json(self, obj: Any) -> Any:
+        """Recursively sanitize objects to make them JSON-serializable."""
+        if isinstance(obj, Text):
+            # Convert Rich Text objects to plain strings
+            return str(obj.plain)
+        elif isinstance(obj, dict):
+            return {key: self._sanitize_for_json(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._sanitize_for_json(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self._sanitize_for_json(item) for item in obj)
+        elif hasattr(obj, '__dict__'):
+            # For objects with __dict__, try to convert to string
+            return str(obj)
+        else:
+            return obj

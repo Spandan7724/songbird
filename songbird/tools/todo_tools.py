@@ -6,8 +6,20 @@ import json
 from typing import Dict, Any, List, Optional
 from rich.console import Console
 from .todo_manager import TodoManager, display_todos_table
+from .semantic_matcher import SemanticMatcher
+from .semantic_config import get_semantic_config
 
 console = Console()
+
+# Module-level semantic matcher - initialized when first needed
+_semantic_matcher: Optional[SemanticMatcher] = None
+
+def _get_semantic_matcher(llm_provider=None) -> Optional[SemanticMatcher]:
+    """Get or create the semantic matcher instance."""
+    global _semantic_matcher
+    if _semantic_matcher is None and llm_provider is not None:
+        _semantic_matcher = SemanticMatcher(llm_provider)
+    return _semantic_matcher
 
 
 async def todo_read(
@@ -102,7 +114,8 @@ async def todo_read(
 
 async def todo_write(
     todos: List[Dict[str, Any]],
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None,
+    llm_provider=None
 ) -> Dict[str, Any]:
     """
     Create, update, and manage todo items.
@@ -124,8 +137,12 @@ async def todo_write(
         updated_count = 0
         completed_count = 0
         errors = []
+        skipped_count = 0
         
-        for todo_data in todos:
+        # Pre-process todos to remove obvious duplicates within the input batch
+        deduplicated_input = await _deduplicate_input_todos(todos, llm_provider)
+        
+        for todo_data in deduplicated_input:
             try:
                 todo_id = todo_data.get("id")
                 content = todo_data.get("content", "").strip()
@@ -144,8 +161,16 @@ async def todo_write(
                     status = "pending"
                 
                 if priority not in valid_priorities:
-                    # Smart prioritization
-                    priority = todo_manager.smart_prioritize(content)
+                    # Smart prioritization using LLM if available
+                    semantic_matcher = _get_semantic_matcher(llm_provider)
+                    if semantic_matcher:
+                        try:
+                            priority = await semantic_matcher.analyze_todo_priority(content)
+                        except Exception:
+                            # Fall back to rule-based prioritization
+                            priority = todo_manager.smart_prioritize(content)
+                    else:
+                        priority = todo_manager.smart_prioritize(content)
                 
                 if todo_id:
                     # Try to update existing todo by ID
@@ -191,8 +216,20 @@ async def todo_write(
                         best_similarity = 0.0
                         
                         for existing in existing_todos:
-                            similarity = _calculate_content_similarity(content, existing.content)
-                            if similarity > 0.75 and similarity > best_similarity:  # Increased threshold
+                            # Use LLM-based semantic matching if available
+                            semantic_matcher = _get_semantic_matcher(llm_provider)
+                            if semantic_matcher:
+                                try:
+                                    similarity = await semantic_matcher.calculate_semantic_similarity(content, existing.content)
+                                except Exception:
+                                    # Fall back to old algorithm if LLM fails
+                                    similarity = _calculate_content_similarity(content, existing.content)
+                            else:
+                                # Use fallback algorithm if no LLM provider
+                                similarity = _calculate_content_similarity(content, existing.content)
+                            
+                            config = get_semantic_config()
+                            if similarity > config.similarity_threshold and similarity > best_similarity:
                                 best_match = existing
                                 best_similarity = similarity
                         
@@ -247,6 +284,11 @@ async def todo_write(
         else:
             message = "No changes made to todos"
         
+        # Report duplicates skipped
+        input_skipped = len(todos) - len(deduplicated_input)
+        if input_skipped > 0:
+            message += f" ({input_skipped} duplicates skipped)"
+        
         if errors:
             message += f" ({len(errors)} errors occurred)"
         
@@ -284,6 +326,11 @@ async def llm_auto_complete_todos(message: str, session_id: Optional[str] = None
     Use LLM to intelligently detect which todos were completed based on user message.
     Returns list of completed todo IDs.
     """
+    # Check configuration
+    config = get_semantic_config()
+    if not config.enable_auto_todo_completion or config.fast_mode:
+        return []
+    
     if not llm_provider:
         return []  # Fallback to no completion if no LLM available
     
@@ -408,7 +455,7 @@ def _normalize_todo_content(content: str) -> str:
 
 def _calculate_content_similarity(content1: str, content2: str) -> float:
     """
-    Calculate semantic similarity between two todo contents.
+    Calculate semantic similarity between two todo contents with enhanced concept matching.
     Returns a value between 0.0 and 1.0, where 1.0 is identical.
     """
     # Normalize both contents
@@ -427,17 +474,145 @@ def _calculate_content_similarity(content1: str, content2: str) -> float:
     if not words1 or not words2:
         return 0.0
     
-    # Calculate Jaccard similarity (intersection over union)
+    # Enhanced similarity with concept-based matching
+    similarity_score = 0.0
+    
+    # 1. Direct word intersection (Jaccard similarity)
     intersection = words1.intersection(words2)
     union = words1.union(words2)
-    
     jaccard_similarity = len(intersection) / len(union)
     
-    # Also check if one content is a substantial subset of the other
+    # 2. Subset similarity (one is subset of the other)
     subset_similarity = len(intersection) / min(len(words1), len(words2))
     
-    # Return the higher of the two similarities, with a slight preference for Jaccard
-    return max(jaccard_similarity, subset_similarity * 0.9)
+    # 3. Concept-based similarity for programming tasks
+    concept_similarity = _calculate_concept_similarity(words1, words2)
+    
+    # 4. Action verb similarity (same action, different objects)
+    action_similarity = _calculate_action_similarity(norm1, norm2)
+    
+    # Combine all similarity measures with weights
+    similarity_score = max(
+        jaccard_similarity * 0.3 + concept_similarity * 0.4 + action_similarity * 0.3,
+        subset_similarity * 0.7 + concept_similarity * 0.3,
+        concept_similarity * 0.9,  # Pure concept match can be strong indicator
+        action_similarity * 0.8 if action_similarity > 0.6 else 0.0  # Strong action match
+    )
+    
+    return min(similarity_score, 1.0)  # Cap at 1.0
+
+
+def _calculate_concept_similarity(words1: set, words2: set) -> float:
+    """
+    Calculate similarity based on programming/project management concepts.
+    Returns similarity score between 0.0 and 1.0.
+    """
+    # Define concept groups for programming tasks
+    concept_groups = {
+        'analysis': {'analyze', 'examine', 'review', 'investigate', 'study', 'inspect', 'assess', 'evaluate'},
+        'implementation': {'implement', 'create', 'build', 'develop', 'code', 'write', 'add', 'construct'},
+        'modification': {'refactor', 'update', 'modify', 'change', 'edit', 'improve', 'enhance', 'optimize'},
+        'testing': {'test', 'validate', 'verify', 'check', 'ensure', 'confirm', 'qa'},
+        'documentation': {'document', 'docs', 'documentation', 'comment', 'readme', 'wiki'},
+        'debugging': {'fix', 'debug', 'resolve', 'solve', 'repair', 'troubleshoot', 'handle', 'address'},
+        'structure': {'structure', 'architecture', 'design', 'layout', 'organization', 'framework'},
+        'performance': {'performance', 'optimize', 'speed', 'efficiency', 'bottleneck', 'latency'},
+        'codebase': {'codebase', 'code', 'project', 'application', 'system', 'repo', 'repository'},
+        'maintenance': {'maintain', 'maintainability', 'cleanup', 'clean', 'organize', 'manage'}
+    }
+    
+    # Find concept matches
+    concept_matches = 0
+    total_concepts = 0
+    
+    for concept_name, concept_words in concept_groups.items():
+        words1_in_concept = len(words1.intersection(concept_words))
+        words2_in_concept = len(words2.intersection(concept_words))
+        
+        if words1_in_concept > 0 or words2_in_concept > 0:
+            total_concepts += 1
+            if words1_in_concept > 0 and words2_in_concept > 0:
+                concept_matches += 1
+    
+    if total_concepts == 0:
+        return 0.0
+    
+    return concept_matches / total_concepts
+
+
+def _calculate_action_similarity(text1: str, text2: str) -> float:
+    """
+    Calculate similarity based on action verbs in todo content.
+    Returns similarity score between 0.0 and 1.0.
+    """
+    # Define action verb groups
+    action_groups = {
+        'create': {'create', 'add', 'build', 'implement', 'develop', 'write', 'establish'},
+        'modify': {'update', 'modify', 'change', 'edit', 'refactor', 'improve', 'enhance'},
+        'analyze': {'analyze', 'examine', 'review', 'investigate', 'study', 'assess'},
+        'fix': {'fix', 'debug', 'resolve', 'solve', 'repair', 'address', 'handle'},
+        'test': {'test', 'validate', 'verify', 'check', 'ensure'},
+        'remove': {'remove', 'delete', 'clean', 'cleanup', 'clear'}
+    }
+    
+    # Extract action from each text
+    def extract_action_group(text):
+        words = text.lower().split()
+        for group_name, group_verbs in action_groups.items():
+            if any(verb in text.lower() for verb in group_verbs):
+                return group_name
+        return None
+    
+    action1 = extract_action_group(text1)
+    action2 = extract_action_group(text2)
+    
+    if action1 and action2 and action1 == action2:
+        return 0.8  # High similarity for same action type
+    elif action1 and action2:
+        return 0.2  # Some similarity for different actions
+    else:
+        return 0.0  # No clear action detected
+
+
+async def _deduplicate_input_todos(input_todos: List[Dict[str, Any]], llm_provider=None) -> List[Dict[str, Any]]:
+    """
+    Remove duplicates from input todo list before processing.
+    This prevents creating multiple similar todos in a single batch.
+    """
+    if not input_todos:
+        return input_todos
+    
+    unique_todos = []
+    seen_contents = []
+    
+    for todo in input_todos:
+        content = todo.get("content", "").strip()
+        if not content:
+            continue
+            
+        # Check if this content is similar to any already seen
+        is_duplicate = False
+        for seen_content in seen_contents:
+            # Use LLM-based semantic matching if available
+            semantic_matcher = _get_semantic_matcher(llm_provider)
+            if semantic_matcher:
+                try:
+                    similarity = await semantic_matcher.calculate_semantic_similarity(content, seen_content)
+                except Exception:
+                    similarity = _calculate_content_similarity(content, seen_content)
+            else:
+                similarity = _calculate_content_similarity(content, seen_content)
+            
+            config = get_semantic_config()
+            if similarity > config.input_dedup_threshold:
+                is_duplicate = True
+                break
+        
+        if not is_duplicate:
+            unique_todos.append(todo)
+            seen_contents.append(content)
+    
+    return unique_todos
 
 
 def _deduplicate_todos(todos: List) -> List:
