@@ -67,7 +67,7 @@ class AgentCore:
                     from ..tools.todo_tools import todo_read
                     await todo_read(session_id=self.session.id, show_completed=True)
                 
-                # Auto-create todos for complex requests (Claude Code-style)
+                # Auto-create todos for complex requests 
                 await self._auto_create_todos_if_needed(user_message)
             
             # Add user message to history
@@ -637,10 +637,6 @@ Remember to follow the plan systematically. Complete the current step before mov
         return False
     
     async def _auto_create_todos_if_needed(self, user_message: str) -> None:
-        """
-        Auto-create todos for complex requests (Claude Code-style behavior).
-        Detects multi-step tasks and automatically creates todo structure.
-        """
         if not self.session:
             return
         

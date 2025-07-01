@@ -76,8 +76,7 @@ class TodoManager:
         self._load_todos()
     
     def _get_storage_path(self) -> Path:
-        """Get the storage path for todos (Claude Code-style: conversation-based)."""
-        # Storage in user's home directory (Claude Code-style flat structure)
+        # Storage in user's home directory
         home = Path.home()
         storage_dir = home / ".songbird" / "todos"
         storage_dir.mkdir(parents=True, exist_ok=True)
@@ -277,7 +276,7 @@ class TodoManager:
     
     def generate_semantic_id(self, content: str) -> str:
         """
-        Generate semantic ID from todo content (Claude Code-style).
+        Generate semantic ID from todo content 
         Returns kebab-case ID like "implement-openai-provider", "fix-auth-bug".
         """
         import re
