@@ -381,7 +381,7 @@ def _display_grep_results(result: Dict[str, Any]):
         )
     
     # Display in a panel
-    panel = Panel(table, border_style="green", padding=(1, 2))
+    panel = Panel(table, border_style="white", padding=(1, 2))
     console.print(panel)
     
     # Show summary

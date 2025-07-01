@@ -8,18 +8,31 @@ from ..ui.data_transfer import ToolOutput, UIMessage, MessageType
 
 
 class ToolRunner:
-    """Clean interface for tool execution without conversation dependencies."""
+    """Clean interface for tool execution with smart status management."""
     
-    def __init__(self, working_directory: str = ".", session_id: Optional[str] = None):
+    def __init__(self, working_directory: str = ".", session_id: Optional[str] = None, ui_layer=None):
         self.working_directory = working_directory
         self.session_id = session_id
+        self.ui_layer = ui_layer
         self.tool_executor = ToolExecutor(working_directory, session_id)
     
     async def execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a tool and return the result."""
+        """Execute a tool with smart status management."""
         try:
+            # Check if tool produces output and pause thinking indicator
+            should_pause_thinking = self._should_pause_thinking_for_tool(tool_name)
+            
+            if should_pause_thinking and self.ui_layer:
+                await self.ui_layer.pause_thinking()
+            
             # Execute the tool using the existing ToolExecutor
             result = await self.tool_executor.execute_tool(tool_name, args)
+            
+            # Resume thinking indicator if we paused it and more processing is expected
+            if should_pause_thinking and self.ui_layer:
+                # Only resume if we're in a context where more processing is expected
+                # (This will be controlled by the orchestrator)
+                pass
             
             # Ensure result is properly formatted
             if not isinstance(result, dict):
@@ -34,6 +47,12 @@ class ToolRunner:
                 "tool_name": tool_name,
                 "args": args
             }
+    
+    def _should_pause_thinking_for_tool(self, tool_name: str) -> bool:
+        """Check if a tool produces output and should pause the thinking indicator."""
+        tool_registry = get_tool_registry()
+        tool_def = tool_registry.get_tool(tool_name)
+        return tool_def.produces_output if tool_def else False
     
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get list of available tools with their schemas."""

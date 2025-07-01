@@ -63,8 +63,12 @@ class AgentCore:
                     user_message, self.session.id, self.provider
                 )
                 if completed_ids:
-                    # TODO: Handle auto-completed todos
-                    pass
+                    # Show updated todo list when todos are auto-completed
+                    from ..tools.todo_tools import todo_read
+                    await todo_read(session_id=self.session.id, show_completed=True)
+                
+                # Auto-create todos for complex requests (Claude Code-style)
+                await self._auto_create_todos_if_needed(user_message)
             
             # Add user message to history
             self.conversation_history.append({
@@ -140,7 +144,7 @@ class AgentCore:
                     description = step.get('description', '')
                 
 
-                plan_display.append(" • ", style="blue")
+                plan_display.append(" • ", style="spring_green1")
                 
                 # Format step description based on action
                 if action == 'file_create':
@@ -172,9 +176,8 @@ class AgentCore:
                 
                 plan_display.append("\n")
             
-            # Display plan without panel - minimal style
             console.print("")
-            console.print("Plan:", style="bold blue")
+            console.print("Plan:", style="spring_green1")
             console.print("")
             console.print(plan_display)
             console.print("")
@@ -632,3 +635,118 @@ Remember to follow the plan systematically. Complete the current step before mov
         
         # Continue by default
         return False
+    
+    async def _auto_create_todos_if_needed(self, user_message: str) -> None:
+        """
+        Auto-create todos for complex requests (Claude Code-style behavior).
+        Detects multi-step tasks and automatically creates todo structure.
+        """
+        if not self.session:
+            return
+        
+        # Check if this looks like a complex, multi-step request
+        message_lower = user_message.lower()
+        
+        # Patterns that indicate complex tasks
+        complex_indicators = [
+            # Direct requests for multi-step work
+            'refactor', 'implement', 'create', 'build', 'develop',
+            'add authentication', 'add auth', 'add login',
+            'set up', 'setup', 'configure',
+            'migrate', 'upgrade', 'update',
+            'optimize', 'improve performance',
+            'debug', 'troubleshoot', 'investigate',
+            # Multi-part requests
+            'and', 'then', 'also', 'plus',
+            # Planning language
+            'plan', 'design', 'architecture',
+            'steps', 'process', 'workflow',
+            # Size indicators
+            'entire', 'whole', 'complete', 'full',
+            'system', 'application', 'project'
+        ]
+        
+        # Check if message contains complexity indicators
+        has_complexity_indicators = any(indicator in message_lower for indicator in complex_indicators)
+        
+        # Check message length (longer messages often indicate complex requests)
+        is_substantial_request = len(user_message.split()) > 10
+        
+        # Check for explicit multi-step language
+        has_multi_step_language = any(phrase in message_lower for phrase in [
+            'step by step', 'one by one', 'first', 'then', 'next', 'finally',
+            'phase', 'stage', 'part', 'section'
+        ])
+        
+        # Only auto-create todos if this looks like a complex request
+        if has_complexity_indicators or (is_substantial_request and has_multi_step_language):
+            try:
+                # Use LLM to generate appropriate todos for this request
+                todos = await self._generate_todos_for_request(user_message)
+                
+                if todos:
+                    from ..tools.todo_tools import todo_write
+                    await todo_write(todos, session_id=self.session.id)
+                    
+                    # Show a subtle message that todos were created
+                    from rich.console import Console
+                    console = Console()
+                    console.print(f"[dim]Created {len(todos)} todos for this task[/dim]")
+                    
+            except Exception:
+                # Silently fail if todo generation doesn't work
+                pass
+    
+    async def _generate_todos_for_request(self, user_message: str) -> List[Dict[str, Any]]:
+        """
+        Use LLM to generate appropriate todos for a complex request.
+        Returns list of todo dictionaries with semantic IDs.
+        """
+        # Create a focused prompt for todo generation
+        prompt = f"""
+Given this user request: "{user_message}"
+
+Generate 3-7 specific, actionable todos to complete this request.
+
+Rules:
+1. Use semantic IDs in kebab-case (e.g., "implement-auth-service", "add-unit-tests")
+2. Break down the request into logical steps
+3. Include appropriate priorities (high/medium/low)
+4. Make each todo specific and actionable
+
+Return ONLY a JSON array in this format:
+[
+  {{"id": "analyze-current-codebase", "content": "Analyze current codebase structure", "priority": "high"}},
+  {{"id": "implement-feature", "content": "Implement the main feature", "priority": "high"}},
+  {{"id": "add-tests", "content": "Add comprehensive tests", "priority": "medium"}}
+]
+"""
+        
+        try:
+            # Use the LLM to generate todos
+            messages = [{"role": "user", "content": prompt}]
+            response = await self.provider.chat_with_messages(messages)
+            
+            if response.content:
+                # Extract JSON from response
+                import json
+                import re
+                
+                # Look for JSON array in the response
+                json_match = re.search(r'\[.*?\]', response.content, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    todos = json.loads(json_str)
+                    
+                    # Validate and return todos
+                    if isinstance(todos, list) and all(
+                        isinstance(todo, dict) and 
+                        'id' in todo and 'content' in todo 
+                        for todo in todos
+                    ):
+                        return todos
+                        
+        except Exception:
+            pass
+        
+        return []  # Return empty list if generation fails

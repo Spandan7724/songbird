@@ -49,3 +49,6 @@ repomix-output.xml
 test_scripts/
 songbird/llm/__pycache__/
 .aider*
+TODO_IMPLEMENTATION.md
+test_code_themes.py
+test_manual_todo_workflow.md

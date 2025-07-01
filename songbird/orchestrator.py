@@ -51,7 +51,7 @@ class SongbirdOrchestrator:
         
         # Initialize layers
         self.ui = ui_layer or UILayer()
-        self.tool_runner = ToolRunner(working_directory, session.id if session else None)
+        self.tool_runner = ToolRunner(working_directory, session.id if session else None, self.ui)
         
         # Register UI for shutdown
         self.shutdown_handler.register_ui_layer(self.ui)

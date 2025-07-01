@@ -76,25 +76,23 @@ class TodoManager:
         self._load_todos()
     
     def _get_storage_path(self) -> Path:
-        """Get the storage path for todos (session-specific)."""
-        # Find project root (git repo or current directory)
-        project_root = self._find_project_root()
-        
-        # Create safe directory name
-        project_path_str = str(project_root)
-        safe_name = project_path_str.replace(os.sep, "-").replace(":", "")
-        
-        # Storage in user's home directory
+        """Get the storage path for todos (Claude Code-style: conversation-based)."""
+        # Storage in user's home directory (Claude Code-style flat structure)
         home = Path.home()
-        storage_dir = home / ".songbird" / "projects" / safe_name
+        storage_dir = home / ".songbird" / "todos"
         storage_dir.mkdir(parents=True, exist_ok=True)
         
         # Use session-specific file if session_id is available
         if self.session_id:
-            return storage_dir / f"todos-{self.session_id}.json"
+            return storage_dir / f"{self.session_id}.json"
         else:
-            # Fallback to shared file for backward compatibility
-            return storage_dir / "todos.json"
+            # Fallback to legacy project-based storage for backward compatibility
+            project_root = self._find_project_root()
+            project_path_str = str(project_root)
+            safe_name = project_path_str.replace(os.sep, "-").replace(":", "")
+            legacy_storage_dir = home / ".songbird" / "projects" / safe_name
+            legacy_storage_dir.mkdir(parents=True, exist_ok=True)
+            return legacy_storage_dir / "todos.json"
     
     def _find_project_root(self) -> Path:
         """Find the VCS root (git) or use current directory."""
@@ -111,8 +109,48 @@ class TodoManager:
         except Exception:
             return self.working_directory
     
+    def migrate_from_project_storage(self) -> bool:
+        """
+        Migrate todos from legacy project-based storage to new conversation-based storage.
+        Returns True if migration was performed, False if no migration needed.
+        """
+        if not self.session_id:
+            return False  # No session ID, can't migrate
+        
+        # Check if new storage already exists
+        new_path = Path.home() / ".songbird" / "todos" / f"{self.session_id}.json"
+        if new_path.exists():
+            return False  # Already migrated
+        
+        # Look for legacy storage
+        project_root = self._find_project_root()
+        project_path_str = str(project_root)
+        safe_name = project_path_str.replace(os.sep, "-").replace(":", "")
+        legacy_dir = Path.home() / ".songbird" / "projects" / safe_name
+        legacy_path = legacy_dir / f"todos-{self.session_id}.json"
+        
+        if not legacy_path.exists():
+            return False  # No legacy file to migrate
+        
+        try:
+            # Copy legacy file to new location
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.copy2(legacy_path, new_path)
+            
+            console.print(f"[green]✓ Migrated todos from legacy storage to {new_path}[/green]")
+            return True
+            
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not migrate todos: {e}[/yellow]")
+            return False
+    
     def _load_todos(self):
-        """Load todos from storage."""
+        """Load todos from storage, attempting migration if needed."""
+        # Try migration from legacy storage first
+        if not self.storage_path.exists() and self.session_id:
+            self.migrate_from_project_storage()
+        
         if not self.storage_path.exists():
             self._todos = []
             return
@@ -136,9 +174,16 @@ class TodoManager:
         except Exception as e:
             console.print(f"[red]Error saving todos: {e}[/red]")
     
-    def add_todo(self, content: str, priority: str = "medium") -> TodoItem:
-        """Add a new todo item."""
+    def add_todo(self, content: str, priority: str = "medium", use_semantic_id: bool = True) -> TodoItem:
+        """Add a new todo item with semantic ID generation."""
+        # Generate semantic ID if requested
+        if use_semantic_id:
+            semantic_id = self.generate_semantic_id(content)
+        else:
+            semantic_id = None
+        
         todo = TodoItem(
+            id=semantic_id,
             content=content,
             priority=priority,
             session_id=self.session_id
@@ -229,6 +274,104 @@ class TodoManager:
                 return "low"
         
         return "medium"
+    
+    def generate_semantic_id(self, content: str) -> str:
+        """
+        Generate semantic ID from todo content (Claude Code-style).
+        Returns kebab-case ID like "implement-openai-provider", "fix-auth-bug".
+        """
+        import re
+        
+        # Clean and normalize content
+        content_lower = content.lower().strip()
+        
+        # Extract key verbs and nouns
+        # Common action verbs for todos
+        action_verbs = [
+            'implement', 'create', 'add', 'build', 'develop', 'write',
+            'fix', 'debug', 'resolve', 'solve', 'repair',
+            'update', 'modify', 'change', 'edit', 'refactor',
+            'test', 'validate', 'verify', 'check',
+            'remove', 'delete', 'clean', 'cleanup',
+            'analyze', 'research', 'investigate', 'explore',
+            'design', 'plan', 'configure', 'setup'
+        ]
+        
+        # Find action verb in content
+        action = None
+        for verb in action_verbs:
+            if verb in content_lower:
+                action = verb
+                break
+        
+        # If no action verb found, try to infer from content
+        if not action:
+            if any(word in content_lower for word in ['bug', 'error', 'issue', 'problem']):
+                action = 'fix'
+            elif any(word in content_lower for word in ['new', 'add']):
+                action = 'add'
+            elif any(word in content_lower for word in ['test', 'testing']):
+                action = 'test'
+            else:
+                action = 'task'
+        
+        # Extract main subject/object
+        # Remove common stop words and action verbs
+        stop_words = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+            'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
+            'before', 'after', 'above', 'below', 'between', 'this', 'that', 'these',
+            'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves'
+        }
+        
+        # Clean content: remove punctuation, split into words
+        clean_content = re.sub(r'[^\w\s-]', ' ', content_lower)
+        words = clean_content.split()
+        
+        # Filter out stop words and action verbs
+        meaningful_words = [
+            word for word in words 
+            if word not in stop_words and word not in action_verbs and len(word) > 2
+        ]
+        
+        # Take up to 3 most meaningful words
+        subject_words = meaningful_words[:3]
+        
+        # Combine action + subject
+        if subject_words:
+            semantic_id = f"{action}-{'-'.join(subject_words)}"
+        else:
+            # Fallback: use first few words of content
+            fallback_words = [w for w in words[:3] if len(w) > 2]
+            if fallback_words:
+                semantic_id = '-'.join(fallback_words)
+            else:
+                semantic_id = f"{action}-task"
+        
+        # Ensure valid kebab-case
+        semantic_id = re.sub(r'[^a-z0-9-]', '-', semantic_id)
+        semantic_id = re.sub(r'-+', '-', semantic_id)  # Remove multiple dashes
+        semantic_id = semantic_id.strip('-')  # Remove leading/trailing dashes
+        
+        # Ensure uniqueness within session
+        return self._ensure_unique_id(semantic_id)
+    
+    def _ensure_unique_id(self, preferred_id: str) -> str:
+        """Ensure the ID is unique within the current session."""
+        existing_ids = {todo.id for todo in self._todos}
+        
+        if preferred_id not in existing_ids:
+            return preferred_id
+        
+        # Try numbered variations
+        for i in range(2, 100):
+            candidate = f"{preferred_id}-{i}"
+            if candidate not in existing_ids:
+                return candidate
+        
+        # Fallback to UUID if we can't find a unique semantic ID
+        import uuid
+        return str(uuid.uuid4())
     
     def generate_smart_todos(self, user_message: str) -> List[str]:
         """Generate smart todo suggestions based on user message."""

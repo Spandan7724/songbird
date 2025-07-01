@@ -175,24 +175,28 @@ async def todo_write(
                     existing_todos = todo_manager.get_current_session_todos()
                     matching_todo = None
                     
-                    # Look for exact content match first
+                    # Normalize the new content for better matching
+                    normalized_content = _normalize_todo_content(content)
+                    
+                    # Look for exact normalized match first
                     for existing in existing_todos:
-                        if existing.content.strip().lower() == content.lower():
+                        normalized_existing = _normalize_todo_content(existing.content)
+                        if normalized_existing == normalized_content:
                             matching_todo = existing
                             break
                     
-                    # If no exact match, look for fuzzy match (partial content)
+                    # If no exact match, look for semantic similarity
                     if not matching_todo:
+                        best_match = None
+                        best_similarity = 0.0
+                        
                         for existing in existing_todos:
-                            # Check if content is a substring of existing todo (and vice versa)
-                            existing_words = set(existing.content.lower().split())
-                            new_words = set(content.lower().split())
-                            
-                            # If most words match, consider it the same todo
-                            common_words = existing_words.intersection(new_words)
-                            if len(common_words) >= min(len(existing_words), len(new_words)) * 0.7:
-                                matching_todo = existing
-                                break
+                            similarity = _calculate_content_similarity(content, existing.content)
+                            if similarity > 0.75 and similarity > best_similarity:  # Increased threshold
+                                best_match = existing
+                                best_similarity = similarity
+                        
+                        matching_todo = best_match
                     
                     if matching_todo:
                         # Update existing todo
@@ -222,9 +226,8 @@ async def todo_write(
         # Get updated todo list for display
         current_todos = todo_manager.get_current_session_todos()
         
-        # Always show all todos (including completed ones) after an update
-        # This way users can see what was completed
-        display_todos = current_todos
+        # Deduplicate todos to prevent double display
+        display_todos = _deduplicate_todos(current_todos)
         
         # Display updated todos
         if display_todos:
@@ -373,6 +376,114 @@ async def fallback_auto_complete_todos(message: str, session_id: Optional[str] =
         pass
     
     return completed_ids
+
+
+def _normalize_todo_content(content: str) -> str:
+    """
+    Normalize todo content for better matching.
+    Removes common variations that don't change semantic meaning.
+    """
+    import re
+    
+    # Convert to lowercase and strip whitespace
+    normalized = content.lower().strip()
+    
+    # Remove common prefixes/suffixes that don't matter for matching
+    prefixes_to_remove = [
+        'todo:', 'task:', 'step:', 'action:', 'next:', 'now:', 'please',
+        'need to', 'should', 'must', 'will', 'going to', 'plan to'
+    ]
+    
+    for prefix in prefixes_to_remove:
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):].strip()
+    
+    # Remove extra whitespace and punctuation that doesn't affect meaning
+    normalized = re.sub(r'[^\w\s]', ' ', normalized)  # Replace punctuation with spaces
+    normalized = re.sub(r'\s+', ' ', normalized)  # Collapse multiple spaces
+    normalized = normalized.strip()
+    
+    return normalized
+
+
+def _calculate_content_similarity(content1: str, content2: str) -> float:
+    """
+    Calculate semantic similarity between two todo contents.
+    Returns a value between 0.0 and 1.0, where 1.0 is identical.
+    """
+    # Normalize both contents
+    norm1 = _normalize_todo_content(content1)
+    norm2 = _normalize_todo_content(content2)
+    
+    # If normalized versions are identical, return 1.0
+    if norm1 == norm2:
+        return 1.0
+    
+    # Split into words
+    words1 = set(norm1.split())
+    words2 = set(norm2.split())
+    
+    # If either is empty, no similarity
+    if not words1 or not words2:
+        return 0.0
+    
+    # Calculate Jaccard similarity (intersection over union)
+    intersection = words1.intersection(words2)
+    union = words1.union(words2)
+    
+    jaccard_similarity = len(intersection) / len(union)
+    
+    # Also check if one content is a substantial subset of the other
+    subset_similarity = len(intersection) / min(len(words1), len(words2))
+    
+    # Return the higher of the two similarities, with a slight preference for Jaccard
+    return max(jaccard_similarity, subset_similarity * 0.9)
+
+
+def _deduplicate_todos(todos: List) -> List:
+    """
+    Remove duplicate todos based on content similarity.
+    If duplicates exist, keep the one with the most recent status change.
+    """
+    if not todos:
+        return todos
+    
+    # Group todos by normalized content
+    content_groups = {}
+    
+    for todo in todos:
+        normalized = _normalize_todo_content(todo.content)
+        
+        # Find if this content matches any existing group
+        matched_group = None
+        for existing_normalized in content_groups.keys():
+            if _calculate_content_similarity(normalized, existing_normalized) > 0.85:
+                matched_group = existing_normalized
+                break
+        
+        if matched_group:
+            content_groups[matched_group].append(todo)
+        else:
+            content_groups[normalized] = [todo]
+    
+    # For each group, keep only the best todo
+    deduplicated = []
+    for group_todos in content_groups.values():
+        if len(group_todos) == 1:
+            deduplicated.append(group_todos[0])
+        else:
+            # Multiple todos with similar content - keep the best one
+            # Priority: completed > in_progress > pending
+            # Secondary: most recent update
+            status_priority = {"completed": 3, "in_progress": 2, "pending": 1}
+            
+            best_todo = max(group_todos, key=lambda t: (
+                status_priority.get(t.status, 0),
+                t.updated_at
+            ))
+            deduplicated.append(best_todo)
+    
+    return deduplicated
 
 
 async def auto_complete_todos_from_message(message: str, session_id: Optional[str] = None, llm_provider=None) -> List[str]:

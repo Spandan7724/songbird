@@ -63,9 +63,9 @@ async def shell_exec(
         
         # Show command in a shell-like format
         shell_display = Text()
-        shell_display.append(f"{shell_prompt} ", style="bold green")
+        shell_display.append(f"{shell_prompt} ", style="bold aquamarine1")
         shell_display.append(command, style="bold white")
-        console.print(Panel(shell_display, title="Shell", title_align="left", border_style="green"))
+        console.print(Panel(shell_display, title="Shell", title_align="left", border_style="aquamarine1"))
         
         # Create subprocess
         process = await asyncio.create_subprocess_exec(

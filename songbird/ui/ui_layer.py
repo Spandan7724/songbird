@@ -73,7 +73,7 @@ class UILayer:
                 panel = Panel(syntax, title="Code", border_style="blue")
                 self.console.print(panel)
             else:
-                self.console.print(f"\n[bold green]Songbird:[/bold green] {message.content}")
+                self.console.print(f"\n[medium_spring_green]Songbird:[/medium_spring_green] {message.content}")
     
     def _display_system_message(self, message: UIMessage) -> None:
         """Display system message."""
@@ -226,6 +226,7 @@ class UILayer:
     async def show_thinking(self, message: str) -> None:
         """Show thinking indicator."""
         from rich.status import Status
+        self._thinking_message = message  # Store the message for resuming
         if not self._thinking_status:
             self._thinking_status = self.console.status(message)
             self._thinking_status.start()
@@ -235,6 +236,30 @@ class UILayer:
         if self._thinking_status:
             self._thinking_status.stop()
             self._thinking_status = None
+    
+    async def pause_thinking(self) -> None:
+        """Temporarily pause thinking indicator for tool output."""
+        if self._thinking_status:
+            self._thinking_status.stop()
+            # Keep reference to resume later but mark as paused
+            if not hasattr(self, '_thinking_message'):
+                self._thinking_message = "Processing..."
+    
+    async def resume_thinking(self, message: str = None) -> None:
+        """Resume thinking indicator after tool output."""
+        # Only resume if we had a thinking status before pausing
+        if hasattr(self, '_thinking_message') or self._thinking_status:
+            resume_message = message or getattr(self, '_thinking_message', "Processing...")
+            if self._thinking_status:
+                self._thinking_status.stop()
+            
+            from rich.status import Status
+            self._thinking_status = self.console.status(resume_message)
+            self._thinking_status.start()
+    
+    def is_thinking(self) -> bool:
+        """Check if thinking indicator is currently active."""
+        return self._thinking_status is not None and self._thinking_status._started
     
     def display_banner(self) -> None:
         """Display the Songbird banner."""
