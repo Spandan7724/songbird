@@ -10,7 +10,6 @@ import os
 import signal
 import sys
 import time
-import warnings
 from threading import Timer
 from typing import Optional
 from datetime import datetime
@@ -18,18 +17,15 @@ import json
 import typer
 
 # HTTP session warnings should now be resolved by proper session management
-import logging
 from rich.console import Console
 from rich.status import Status
-from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.markdown import Markdown
 from . import __version__
-from .llm.providers import get_provider, get_default_provider, get_default_provider_name, list_available_providers, get_provider_info
+from .llm.providers import get_default_provider_name, get_provider_info
 from .orchestrator import SongbirdOrchestrator
 from .memory.optimized_manager import OptimizedSessionManager
 from .memory.models import Session
-from .commands import CommandInputHandler, get_command_registry
+from .commands import CommandInputHandler
 from .memory.history_manager import MessageHistoryManager
 from .commands.loader import is_command_input, parse_command_input, load_all_commands
 from .cli_utils import (enhanced_cli, display_enhanced_help)
@@ -490,7 +486,6 @@ def replay_conversation(session: Session):
 
 async def interactive_set_default():
     """Interactive menu for setting default provider and model."""
-    from .llm.providers import get_provider_info
     from .commands.model_command import ModelCommand
     from .conversation import safe_interactive_menu
     
@@ -651,7 +646,9 @@ def main(
     provider_url: Optional[str] = typer.Option(
         None, "--provider-url", help="Custom API base URL for provider", hidden=True),
     set_default: bool = typer.Option(
-        False, "--default", help="Set default provider and model interactively")
+        False, "--default", help="Set default provider and model interactively"),
+    fast_mode: bool = typer.Option(
+        False, "--fast", help="Enable fast mode (disables auto-todos and LLM intelligence for faster responses)")
 ):
     """
     Songbird - Terminal-first AI coding companion
@@ -660,8 +657,15 @@ def main(
     Run 'songbird --continue' to continue your latest session.
     Run 'songbird --resume' to select and resume a previous session.
     Run 'songbird --default' to set your default provider and model interactively.
+    Run 'songbird --fast' to enable fast mode for better performance.
     Run 'songbird version' to show version information.
+    
+    Environment variables:
+    - SONGBIRD_FAST_MODE=1: Enable fast mode
     """
+    # Check environment variable for fast mode
+    if not fast_mode and os.getenv("SONGBIRD_FAST_MODE", "").lower() in ("1", "true", "yes"):
+        fast_mode = True
     if set_default:
         # Handle --default flag - always interactive mode
         import asyncio
@@ -708,7 +712,7 @@ def main(
         # No subcommand provided, start chat session
         chat(provider=provider,
              continue_session=continue_session, resume_session=resume_session,
-             provider_url=provider_url)
+             provider_url=provider_url, fast_mode=fast_mode)
 
 
 @app.command()
@@ -731,10 +735,18 @@ def chat(
     provider: Optional[str] = None,
     continue_session: bool = False,
     resume_session: bool = False,
-    provider_url: Optional[str] = None
+    provider_url: Optional[str] = None,
+    fast_mode: bool = False
 ) -> None:
     """Start an interactive Songbird session with AI and tools."""
     show_banner()
+    
+    # Configure fast mode if requested
+    if fast_mode:
+        from .tools.semantic_config import enable_fast_mode
+        enable_fast_mode()
+        console.print("[dim]Fast mode enabled - auto-todos and LLM intelligence disabled for better performance[/dim]")
+        console.print()
 
     # Initialize optimized session manager
     session_manager = OptimizedSessionManager(working_directory=os.getcwd())
@@ -880,7 +892,7 @@ def chat(
     try:
         from .llm.aiohttp_session_manager import configure_google_genai_aiohttp
         configure_google_genai_aiohttp()
-    except Exception as e:
+    except Exception:
         # Non-critical error, continue without custom session configuration
         pass
     
@@ -962,10 +974,10 @@ def chat(
                     
                     # Close the loop properly
                     loop.close()
-                except Exception as e:
+                except Exception:
                     # Log cleanup error but don't crash
                     pass
-        except Exception as e:
+        except Exception:
             # Fallback to asyncio.run if manual management fails
             asyncio.run(managed_chat())
 
@@ -1205,7 +1217,6 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
 def version() -> None:
     """Show Songbird version information."""
     show_banner()
-    from . import __version__
     console.print(f"\nSongbird v{__version__}", style="bold cyan")
     console.print("Terminal-first AI coding companion", style="dim")
 

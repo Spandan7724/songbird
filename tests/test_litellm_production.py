@@ -6,18 +6,13 @@ Tests end-to-end functionality, CLI integration, real-world scenarios,
 and production readiness of the LiteLLM adapter system.
 """
 import pytest
-import asyncio
-import tempfile
 import subprocess
 import sys
 import os
-from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock
-from songbird.cli import main as cli_main
+from unittest.mock import Mock, patch
 from songbird.llm.providers import create_litellm_provider
 from songbird.llm.litellm_adapter import LiteLLMAdapter
 from songbird.config.mapping_loader import load_provider_mapping
-from songbird.llm.types import ChatResponse
 
 
 @pytest.mark.slow
@@ -278,7 +273,6 @@ class TestLiteLLMProductionDeployment:
             mock_litellm.return_value = Mock()
             
             # Mock CLI context
-            from typer import Context
             
             # Test that --litellm flag triggers LiteLLM provider usage
             # This would be called internally when --litellm flag is used
@@ -321,7 +315,7 @@ class TestLiteLLMProductionDeployment:
         
         # Create multiple adapters (simulating production load)
         for i in range(10):
-            adapter = LiteLLMAdapter(f"openai/gpt-4o")
+            adapter = LiteLLMAdapter("openai/gpt-4o")
             adapters.append(adapter)
         
         # All should be created successfully
@@ -339,7 +333,6 @@ class TestLiteLLMMonitoring:
     
     def test_logging_integration(self):
         """Test logging works properly for monitoring."""
-        import logging
         
         # Test that LiteLLM adapter logs appropriately
         with patch('songbird.llm.litellm_adapter.logger') as mock_logger:
@@ -351,8 +344,7 @@ class TestLiteLLMMonitoring:
     def test_error_classification_production(self):
         """Test error classification for production monitoring."""
         from songbird.llm.litellm_adapter import (
-            LiteLLMAuthenticationError, LiteLLMRateLimitError,
-            LiteLLMModelError, LiteLLMConnectionError
+            LiteLLMAuthenticationError, LiteLLMRateLimitError
         )
         
         adapter = LiteLLMAdapter("openai/gpt-4o")

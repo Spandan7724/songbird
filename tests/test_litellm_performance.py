@@ -12,12 +12,9 @@ import pytest
 import psutil
 import os
 import gc
-from typing import List, Dict, Any
 from unittest.mock import Mock, patch, AsyncMock
 
 from songbird.llm.litellm_adapter import LiteLLMAdapter
-from songbird.llm.providers import create_litellm_provider
-from songbird.llm.types import ChatResponse
 
 
 @pytest.mark.slow

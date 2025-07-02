@@ -3,8 +3,6 @@
 LS tool for directory listing with minimal formatting.
 """
 import os
-import stat
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from rich.console import Console

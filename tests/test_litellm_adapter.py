@@ -12,8 +12,7 @@ Tests all aspects of the LiteLLM adapter including:
 - Environment variable validation
 """
 import pytest
-import asyncio
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from unittest.mock import Mock, patch, AsyncMock
 from songbird.llm.litellm_adapter import (
     LiteLLMAdapter,
     LiteLLMError, LiteLLMConnectionError, LiteLLMAuthenticationError,

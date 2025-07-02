@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """Integration tests for end-to-end workflows in Songbird."""
 
-import asyncio
 import tempfile
 import pytest
-import json
 import sys
 from pathlib import Path
-from unittest.mock import Mock, AsyncMock, patch
 
 # Add the songbird directory to the path
 sys.path.insert(0, str(Path(__file__).parent.parent))

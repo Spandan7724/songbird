@@ -1,7 +1,6 @@
 """Tests for Ollama provider implementation using LiteLLM."""
 import pytest
 from songbird.llm.providers import get_litellm_provider
-from songbird.llm.types import ChatResponse
 
 
 class TestOllamaLiteLLMProvider:

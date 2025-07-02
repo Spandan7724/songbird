@@ -1,7 +1,6 @@
 # songbird/tools/tool_registry.py
 """Centralized tool registry for dynamic tool management and provider-agnostic schemas."""
 
-import json
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -14,6 +13,7 @@ from .glob_tool import glob_pattern
 from .grep_tool import grep_search
 from .ls_tool import ls_directory
 from .multiedit_tool import multi_edit
+from .tree_tool import tree_display
 
 
 class ToolCategory(Enum):
@@ -37,6 +37,7 @@ class ToolDefinition:
     requires_confirmation: bool = False
     is_destructive: bool = False
     parallel_safe: bool = True
+    produces_output: bool = False  # Whether tool produces immediate console output
     version: str = "1.0"
     
     def to_llm_schema(self, provider_format: str = "openai") -> Dict[str, Any]:
@@ -108,7 +109,8 @@ class ToolRegistry:
                 }
             },
             examples=["file_read('config.py')", "file_read('main.py', lines=50)"],
-            parallel_safe=True
+            parallel_safe=True,
+            produces_output=False  # Silent tool - just returns data
         ))
         
         self.register_tool(ToolDefinition(
@@ -136,7 +138,8 @@ class ToolRegistry:
             },
             examples=["file_create('main.py', 'print(\"Hello World\")')"],
             is_destructive=False,
-            parallel_safe=False  # File creation should be sequential
+            parallel_safe=False,  # File creation should be sequential
+            produces_output=True  # Shows content preview
         ))
         
         self.register_tool(ToolDefinition(
@@ -170,7 +173,8 @@ class ToolRegistry:
             examples=["file_edit('config.py', new_content)"],
             is_destructive=True,
             requires_confirmation=True,
-            parallel_safe=False
+            parallel_safe=False,
+            produces_output=True  # Shows diff preview
         ))
         
         # Search Tools
@@ -213,7 +217,8 @@ class ToolRegistry:
                 }
             },
             examples=["file_search('*.py')", "file_search('TODO', file_type='py')"],
-            parallel_safe=True
+            parallel_safe=True,
+            produces_output=True  # Shows search results table
         ))
         
         self.register_tool(ToolDefinition(
@@ -256,7 +261,8 @@ class ToolRegistry:
                 }
             },
             examples=["glob('**/*.py')", "glob('src/**/*.js')"],
-            parallel_safe=True
+            parallel_safe=True,
+            produces_output=True  # Shows file listing
         ))
         
         self.register_tool(ToolDefinition(
@@ -313,17 +319,18 @@ class ToolRegistry:
                 }
             },
             examples=["grep('function.*async')", "grep('TODO', file_pattern='*.py')"],
-            parallel_safe=True
+            parallel_safe=True,
+            produces_output=True  # Shows search results with context
         ))
         
         self.register_tool(ToolDefinition(
             name="ls",
             function=ls_directory,
             category=ToolCategory.FILE_OPERATIONS,
-            description="List directory contents with detailed information",
+            description="List directory contents with detailed file metadata, sorting, and filtering for file management tasks",
             schema={
                 "name": "ls",
-                "description": "List directory contents with metadata and filtering options",
+                "description": "List directory contents with detailed metadata including file sizes, permissions, modification dates. Ideal for file management, finding specific files, sorting by attributes, or when detailed file information is needed. Use when user asks 'what files are here', needs file sizes, wants to sort files, or requires file metadata.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -371,8 +378,71 @@ class ToolRegistry:
                     "required": ["path"]
                 }
             },
-            examples=["ls('.')", "ls('.', recursive=True)"],
-            parallel_safe=True
+            examples=["ls('.', long_format=True) # detailed file info", "ls('.', sort_by='size') # file management", "ls('.', recursive=True) # deep listing"],
+            parallel_safe=True,
+            produces_output=True  # Shows directory listing
+        ))
+        
+        self.register_tool(ToolDefinition(
+            name="tree",
+            function=tree_display,
+            category=ToolCategory.FILE_OPERATIONS,
+            description="Display project structure and organization in hierarchical tree format for exploration and understanding",
+            schema={
+                "name": "tree",
+                "description": "Display directory structure in hierarchical tree format. Ideal for project exploration, understanding codebase organization, explaining project structure, and getting architectural overviews. Use when user asks to 'explain project', 'show structure', 'understand organization', or needs a visual hierarchy of directories and files.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Directory path to display tree for",
+                            "default": "."
+                        },
+                        "max_depth": {
+                            "type": "integer",
+                            "description": "Maximum depth to traverse",
+                            "default": 3
+                        },
+                        "show_hidden": {
+                            "type": "boolean",
+                            "description": "Whether to show hidden files/directories",
+                            "default": False
+                        },
+                        "show_sizes": {
+                            "type": "boolean",
+                            "description": "Whether to show file sizes",
+                            "default": True
+                        },
+                        "exclude_patterns": {
+                            "type": "array",
+                            "description": "Additional patterns to exclude",
+                            "items": {"type": "string"},
+                            "default": None
+                        },
+                        "include_only": {
+                            "type": "array",
+                            "description": "Only include files/dirs matching these patterns",
+                            "items": {"type": "string"},
+                            "default": None
+                        },
+                        "dirs_only": {
+                            "type": "boolean",
+                            "description": "Show only directories",
+                            "default": False
+                        },
+                        "files_only": {
+                            "type": "boolean",
+                            "description": "Show only files",
+                            "default": False
+                        }
+                    },
+                    "required": ["path"]
+                }
+            },
+            examples=["tree('.') # project overview", "tree('.', max_depth=2) # high-level structure", "tree('.', dirs_only=True) # directory organization"],
+            parallel_safe=True,
+            produces_output=True  # Shows tree structure
         ))
         
         # Shell Operations
@@ -407,7 +477,8 @@ class ToolRegistry:
             },
             examples=["shell_exec('ls -la')", "shell_exec('python test.py')"],
             is_destructive=True,
-            parallel_safe=False
+            parallel_safe=False,
+            produces_output=True  # Shows command output with live streaming
         ))
         
         # Task Management
@@ -440,7 +511,8 @@ class ToolRegistry:
                 }
             },
             examples=["todo_read()", "todo_read(status='pending')"],
-            parallel_safe=True
+            parallel_safe=True,
+            produces_output=True  # Shows todo table
         ))
         
         self.register_tool(ToolDefinition(
@@ -477,7 +549,8 @@ class ToolRegistry:
                 }
             },
             examples=["todo_write([{'content': 'Task', 'status': 'pending', 'priority': 'high'}])"],
-            parallel_safe=False
+            parallel_safe=False,
+            produces_output=True  # Shows updated todo table
         ))
         
         # Bulk Operations
@@ -526,7 +599,8 @@ class ToolRegistry:
             examples=["multi_edit([{'file_path': 'a.py', 'new_content': '...'}])"],
             is_destructive=True,
             requires_confirmation=True,
-            parallel_safe=False
+            parallel_safe=False,
+            produces_output=True  # Shows multi-file diff previews
         ))
     
     def register_tool(self, tool_def: ToolDefinition):
@@ -630,3 +704,39 @@ def get_tool_function(tool_name: str) -> Optional[Callable]:
 def get_tool_schemas(provider_format: str = "openai") -> List[Dict[str, Any]]:
     """Get tool schemas for LLM providers."""
     return _tool_registry.get_llm_schemas(provider_format)
+
+
+def get_filtered_tool_schemas(provider_format: str = "openai", exclude_categories: List[ToolCategory] = None) -> List[Dict[str, Any]]:
+    """Get tool schemas for LLM providers with category filtering."""
+    exclude_categories = exclude_categories or []
+    
+    filtered_tools = {
+        name: tool_def for name, tool_def in _tool_registry._tools.items()
+        if tool_def.category not in exclude_categories
+    }
+    
+    return [
+        tool_def.to_llm_schema(provider_format)
+        for tool_def in filtered_tools.values()
+    ]
+
+
+def get_llm_tool_schemas(provider_format: str = "openai") -> List[Dict[str, Any]]:
+    """Get tool schemas for LLM providers with hybrid todo access.
+    
+    Allows LLM to read todos (todo_read) for context awareness,
+    but blocks todo creation (todo_write) to maintain single source of truth.
+    Auto-creation and real-time completion remain the only write sources.
+    """
+    # Get all tools except the blocked ones
+    blocked_tools = {'todo_write'}  # Block only todo_write, allow todo_read
+    
+    filtered_tools = {
+        name: tool_def for name, tool_def in _tool_registry._tools.items()
+        if name not in blocked_tools
+    }
+    
+    return [
+        tool_def.to_llm_schema(provider_format)
+        for tool_def in filtered_tools.values()
+    ]

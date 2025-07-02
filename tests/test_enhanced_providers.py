@@ -5,11 +5,10 @@ tool calling, and agentic support using LiteLLM.
 """
 import pytest
 import os
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch
 from songbird.llm.providers import (
     get_litellm_provider, get_provider, list_available_providers, get_default_provider
 )
-from songbird.llm.types import ChatResponse
 
 
 class TestEnhancedOllamaProvider:

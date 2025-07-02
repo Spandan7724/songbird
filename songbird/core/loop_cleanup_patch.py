@@ -7,7 +7,6 @@ This is a more aggressive approach that patches the event loop cleanup.
 import asyncio
 import atexit
 import logging
-import sys
 import warnings
 
 logger = logging.getLogger(__name__)

@@ -4,17 +4,14 @@ Grep tool for advanced content search with regex support.
 """
 import re
 import asyncio
-import subprocess
 import shutil
 import json
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Pattern
+from typing import Dict, Any, Optional
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.text import Text
-from rich.syntax import Syntax
 
 console = Console()
 
@@ -199,7 +196,6 @@ async def _grep_with_python(
     """Python fallback for grep functionality."""
     
     import glob
-    import fnmatch
     
     matches = []
     
@@ -381,7 +377,7 @@ def _display_grep_results(result: Dict[str, Any]):
         )
     
     # Display in a panel
-    panel = Panel(table, border_style="green", padding=(1, 2))
+    panel = Panel(table, border_style="white", padding=(1, 2))
     console.print(panel)
     
     # Show summary

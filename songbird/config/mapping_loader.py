@@ -1,7 +1,6 @@
 # songbird/config/mapping_loader.py
 """Provider mapping configuration loader with user extensibility support."""
 
-import os
 import tomllib
 from pathlib import Path
 from typing import Dict, Any, Optional, List

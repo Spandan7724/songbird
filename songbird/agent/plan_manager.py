@@ -2,7 +2,6 @@
 """Plan generation and management for agentic workflows."""
 
 import json
-import uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
@@ -92,7 +91,7 @@ class PlanManager:
             
             return plan
             
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError):
             # Plan parsing failed - return None to fall back to direct execution
             return None
     

@@ -4,7 +4,7 @@ Tool execution system for handling LLM function calls.
 """
 import asyncio
 from typing import Dict, Any, List
-from .tool_registry import get_tool_function, get_tool_schemas
+from .tool_registry import get_tool_function, get_llm_tool_schemas
 from ..config.config_manager import get_config
 
 
@@ -84,5 +84,5 @@ class ToolExecutor:
         return await asyncio.gather(*tasks)
     
     def get_available_tools(self) -> List[Dict[str, Any]]:
-        """Get list of available tool schemas for LLM."""
-        return get_tool_schemas()
+        """Get list of available tool schemas for LLM (excluding task management tools)."""
+        return get_llm_tool_schemas()

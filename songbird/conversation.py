@@ -3,16 +3,12 @@
 Legacy conversation orchestrator that delegates to the new SongbirdOrchestrator.
 This file maintains backwards compatibility while the new architecture is in use.
 """
-import asyncio
-import json
-import os
 import sys
-from typing import List, Dict, Any, Optional
+from typing import Optional
 from rich.console import Console
 from InquirerPy import inquirer
 from .llm.providers import BaseProvider
-from .memory.models import Session, Message
-from .memory.manager import SessionManager
+from .memory.models import Session
 
 
 async def safe_interactive_menu(prompt: str, options: list[str], default_index: int = 0) -> int | None:

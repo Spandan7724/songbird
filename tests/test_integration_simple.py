@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Simplified integration tests focusing on component integration."""
 
-import asyncio
 import tempfile
 import pytest
 import sys
