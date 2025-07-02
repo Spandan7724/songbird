@@ -13,7 +13,7 @@ from ..llm.providers import BaseProvider
 from ..ui.data_transfer import UIMessage, AgentOutput, MessageType
 from ..memory.models import Session, Message
 from ..memory.manager import SessionManager
-from ..tools.todo_tools import auto_complete_todos_from_message
+# Note: auto_complete_todos_from_message removed - now auto-completion happens after tool execution
 from .planning import AgentPlan, PlanStep, PlanStatus
 from .plan_manager import PlanManager
 from ..config.config_manager import get_config
@@ -65,45 +65,12 @@ class AgentCore:
             from ..tools.semantic_config import get_semantic_config
             config = get_semantic_config()
             
-            # Auto-complete and auto-create todos if enabled and we have a session
+            # Auto-create todos if enabled and we have a session
+            # NOTE: Auto-completion now happens AFTER tool execution (better timing)
             if self.session and not config.fast_mode:
-                if config.parallel_llm_calls:
-                    # Run auto-completion and auto-creation in parallel
-                    tasks = []
-                    if config.enable_auto_todo_completion:
-                        tasks.append(auto_complete_todos_from_message(
-                            user_message, self.session.id, self.provider
-                        ))
-                    
-                    # Run the tasks in parallel
-                    if tasks:
-                        results = await asyncio.gather(*tasks, return_exceptions=True)
-                        
-                        # Handle auto-completion results
-                        if config.enable_auto_todo_completion and len(results) > 0:
-                            completed_ids = results[0] if not isinstance(results[0], Exception) else []
-                            if completed_ids:
-                                # Show updated todo list when todos are auto-completed
-                                from ..tools.todo_tools import todo_read
-                                await todo_read(session_id=self.session.id, show_completed=True)
-                    
-                    # Auto-create todos after completion check (needs to be sequential)
-                    if config.enable_auto_todo_creation:
-                        await self._auto_create_todos_if_needed(user_message)
-                else:
-                    # Sequential execution (original behavior)
-                    if config.enable_auto_todo_completion:
-                        completed_ids = await auto_complete_todos_from_message(
-                            user_message, self.session.id, self.provider
-                        )
-                        if completed_ids:
-                            # Show updated todo list when todos are auto-completed
-                            from ..tools.todo_tools import todo_read
-                            await todo_read(session_id=self.session.id, show_completed=True)
-                    
-                    # Auto-create todos for complex requests 
-                    if config.enable_auto_todo_creation:
-                        await self._auto_create_todos_if_needed(user_message)
+                # Auto-create todos for complex requests 
+                if config.enable_auto_todo_creation:
+                    await self._auto_create_todos_if_needed(user_message)
             
             # Add user message to history
             self.conversation_history.append({
@@ -386,6 +353,34 @@ Remember to follow the plan systematically. Complete the current step before mov
                 # Execute the tool
                 result = await self.tool_runner.execute_tool(function_name, arguments)
                 
+                # Check if this tool completed any todos (real-time completion detection)
+                if self.session and result.get("success"):
+                    from ..tools.todo_tools import analyze_tool_completion
+                    from ..tools.todo_manager import TodoManager
+                    
+                    todo_manager = TodoManager(session_id=self.session.id)
+                    active_todos = [
+                        t for t in todo_manager.get_current_session_todos() 
+                        if t.status in ['pending', 'in_progress']
+                    ]
+                    
+                    if active_todos:
+                        completed_ids = await analyze_tool_completion(
+                            function_name,
+                            arguments,
+                            active_todos,
+                            self.provider
+                        )
+                        
+                        # Mark todos as completed
+                        for todo_id in completed_ids:
+                            todo_manager.complete_todo(todo_id)
+                        
+                        # If any todos were completed, show updated todo list
+                        if completed_ids:
+                            from ..tools.todo_tools import todo_read
+                            await todo_read(session_id=self.session.id, show_completed=True)
+                
                 # Update plan if we have one and this tool matches the next step
                 if self.current_plan:
                     next_step = self.plan_manager.get_next_step()
@@ -611,6 +606,8 @@ Remember to follow the plan systematically. Complete the current step before mov
                 )
                 self.session.add_message(tool_msg)
             
+            # Note: Auto-completion now handled in real-time during tool execution (lines 356-382)
+            
             # Force immediate flush of session after adding all messages
             if self.session_manager:
                 await self.session_manager.flush_session(self.session)
@@ -771,24 +768,43 @@ EXISTING TODOS IN THIS SESSION:
 
 IMPORTANT: Do NOT create todos that are similar to or duplicate the existing ones above. Focus on different aspects or complementary tasks."""
         
-        # Create a focused prompt for todo generation
+        # Create a focused prompt for todo generation with proper granularity
         prompt = f"""
-Given this user request: "{user_message}"{existing_context}
+Analyze this request and generate appropriate todos: "{user_message}"{existing_context}
 
-Generate 3-7 specific, actionable todos to complete this request.
+CRITICAL RULES FOR TODO GENERATION:
+1. Create todos at the RIGHT level of granularity
+2. One todo per ACTUAL unit of work that would be done separately
+3. If multiple things will be done in one action, make it ONE todo
+4. Think like a developer - what are the logical chunks of work?
 
-Rules:
+GOOD Examples:
+- "Create a Python file with BFS implementation" → 1 todo: "implement-bfs-algorithm"
+- "Build a REST API with auth" → 3-4 todos: "setup-api-structure", "implement-endpoints", "add-authentication", "add-tests"
+- "Fix the login bug and update docs" → 2 todos: "fix-login-bug", "update-documentation"
+
+BAD Examples (TOO GRANULAR):
+- "Create a Python file with BFS" → 4 todos: "create-file", "write-algorithm", "add-inputs", "call-function"
+- "Implement feature" → 6 todos: "create-file", "add-imports", "write-function", "add-variables", "call-function", "print-result"
+
+Guidelines for Granularity:
+- One file creation with implementation = ONE todo
+- Each separate feature/component = ONE todo  
+- Each major refactor = ONE todo
+- Each distinct bug fix = ONE todo
+- Don't break down actions that happen together in one file/command
+
+Technical Rules:
 1. Use semantic IDs in kebab-case (e.g., "implement-auth-service", "add-unit-tests")
-2. Break down the request into logical steps
-3. Include appropriate priorities (high/medium/low)
-4. Make each todo specific and actionable
-5. Avoid duplicating or overlapping with existing todos listed above
+2. Include appropriate priorities (high/medium/low)
+3. Make each todo specific and actionable
+4. Avoid duplicating existing todos
+5. Generate 1-5 todos (not 3-7) - focus on quality over quantity
 
 Return ONLY a JSON array in this format:
 [
-  {{"id": "analyze-current-codebase", "content": "Analyze current codebase structure", "priority": "high"}},
-  {{"id": "implement-feature", "content": "Implement the main feature", "priority": "high"}},
-  {{"id": "add-tests", "content": "Add comprehensive tests", "priority": "medium"}}
+  {{"id": "implement-bfs-algorithm", "content": "Implement BFS algorithm in Python", "priority": "high"}},
+  {{"id": "add-algorithm-tests", "content": "Add unit tests for the algorithm", "priority": "medium"}}
 ]
 """
         
@@ -820,6 +836,125 @@ Return ONLY a JSON array in this format:
             pass
         
         return []  # Return empty list if generation fails
+    
+    # Note: Old batch auto-completion system removed - now using real-time completion during tool execution
+    
+    # Note: _build_completion_context removed - using real-time completion instead
+    
+    # Note: _unified_llm_auto_complete removed - using real-time analyze_tool_completion instead
+    
+    # Note: _describe_tool_accomplishment_with_context and _get_user_context removed - using real-time completion instead
+    
+    def _describe_tool_accomplishment(self, tool_name: str, result: Dict[str, Any]) -> Optional[str]:
+        """Convert a successful tool execution into a detailed, context-rich accomplishment description."""
+        if not result.get("success"):
+            return None
+        
+        if tool_name == "file_create":
+            filename = result.get('filename', 'unknown file')
+            content_info = ""
+            
+            # Extract content hints from the result
+            if 'content' in result:
+                content = str(result['content']).lower()  # Full content for analysis
+                content_preview = content[:100]  # First 100 chars for display
+                
+                # Look for specific patterns
+                patterns = []
+                if 'def ' in content_preview or 'class ' in content_preview:
+                    patterns.append("Python code")
+                elif 'function' in content_preview or '=>' in content_preview:
+                    patterns.append("JavaScript code")
+                
+                if 'algorithm' in content or 'bfs' in content:
+                    patterns.append("algorithm implementation")
+                
+                if 'hardcoded' in content or ('graph = {' in content and 'start' in content):
+                    patterns.append("hardcoded inputs")
+                
+                if 'import' in content or 'from ' in content:
+                    patterns.append("Python imports")
+                    
+                if patterns:
+                    content_info = f" containing {' and '.join(patterns)}"
+                elif content.strip():
+                    content_info = f" with content about {content_preview.split()[0] if content_preview.split() else 'code'}"
+                else:
+                    content_info = ""
+            
+            # Check filename for hints
+            if filename.endswith('.py'):
+                if 'bfs' in filename.lower():
+                    content_info = content_info or " implementing BFS algorithm"
+                elif 'test' in filename.lower():
+                    content_info = content_info or " containing test code"
+                else:
+                    content_info = content_info or " containing Python code"
+            elif filename.endswith('.js'):
+                content_info = content_info or " containing JavaScript code"
+            elif filename.endswith('.json'):
+                content_info = content_info or " with configuration data"
+            
+            return f"Created file '{filename}'{content_info}"
+            
+        elif tool_name == "file_edit":
+            filename = result.get('filename', 'unknown file')
+            changes_info = ""
+            if 'changes' in result or 'modified' in result:
+                changes_info = " with code modifications"
+            return f"Edited file '{filename}'{changes_info}"
+            
+        elif tool_name == "shell_exec":
+            command = result.get("command", "")
+            output = result.get("output", "")
+            
+            # Provide detailed context based on command and output
+            if command.startswith("python"):
+                script_name = command.split()[-1] if len(command.split()) > 1 else "script"
+                output_info = ""
+                
+                if output:
+                    output_preview = output[:200]  # First 200 chars of output
+                    if 'BFS' in output and 'Order' in output:
+                        output_info = f" producing BFS traversal results: {output_preview}"
+                    elif 'Error' in output or 'error' in output.lower():
+                        output_info = f" with error output: {output_preview}"
+                    elif output.strip():
+                        output_info = f" with output: {output_preview}"
+                
+                return f"Successfully executed Python script '{script_name}'{output_info}"
+            elif "test" in command:
+                return f"Ran tests with command: {command}"
+            elif "install" in command:
+                return f"Installed dependencies: {command}"
+            else:
+                output_info = f" (output: {output[:100]})" if output else ""
+                return f"Executed command '{command}'{output_info}"
+                
+        elif tool_name == "file_search":
+            pattern = result.get('pattern', 'unknown pattern')
+            count = result.get('matches', 0) if 'matches' in result else "some"
+            return f"Searched for files matching '{pattern}' and found {count} results"
+            
+        elif tool_name == "grep":
+            pattern = result.get('pattern', 'unknown pattern') 
+            count = result.get('matches', 0) if 'matches' in result else "some"
+            return f"Searched file contents for '{pattern}' and found {count} matches"
+            
+        elif tool_name == "todo_write":
+            created = result.get('created', 0)
+            return f"Created {created} new todo items for task management"
+            
+        elif tool_name == "todo_read":
+            count = result.get('count', 0) if 'count' in result else "current"
+            return f"Reviewed {count} items in the todo list"
+        else:
+            # Generic accomplishment for other tools with more context
+            success_msg = result.get('message', '') or result.get('output', '')
+            context = f" - {success_msg[:50]}" if success_msg else ""
+            return f"Successfully executed {tool_name}{context}"
+    
+    # Note: _match_accomplishments_to_todos removed - replaced by _unified_llm_auto_complete
     
     def _sanitize_for_json(self, obj: Any) -> Any:
         """Recursively sanitize objects to make them JSON-serializable."""

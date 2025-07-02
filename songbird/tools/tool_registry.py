@@ -705,3 +705,39 @@ def get_tool_function(tool_name: str) -> Optional[Callable]:
 def get_tool_schemas(provider_format: str = "openai") -> List[Dict[str, Any]]:
     """Get tool schemas for LLM providers."""
     return _tool_registry.get_llm_schemas(provider_format)
+
+
+def get_filtered_tool_schemas(provider_format: str = "openai", exclude_categories: List[ToolCategory] = None) -> List[Dict[str, Any]]:
+    """Get tool schemas for LLM providers with category filtering."""
+    exclude_categories = exclude_categories or []
+    
+    filtered_tools = {
+        name: tool_def for name, tool_def in _tool_registry._tools.items()
+        if tool_def.category not in exclude_categories
+    }
+    
+    return [
+        tool_def.to_llm_schema(provider_format)
+        for tool_def in filtered_tools.values()
+    ]
+
+
+def get_llm_tool_schemas(provider_format: str = "openai") -> List[Dict[str, Any]]:
+    """Get tool schemas for LLM providers with hybrid todo access.
+    
+    Allows LLM to read todos (todo_read) for context awareness,
+    but blocks todo creation (todo_write) to maintain single source of truth.
+    Auto-creation and real-time completion remain the only write sources.
+    """
+    # Get all tools except the blocked ones
+    blocked_tools = {'todo_write'}  # Block only todo_write, allow todo_read
+    
+    filtered_tools = {
+        name: tool_def for name, tool_def in _tool_registry._tools.items()
+        if name not in blocked_tools
+    }
+    
+    return [
+        tool_def.to_llm_schema(provider_format)
+        for tool_def in filtered_tools.values()
+    ]

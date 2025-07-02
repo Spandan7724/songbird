@@ -432,7 +432,7 @@ def display_todos_table(todos: List[TodoItem], title: str = "Current Tasks", sho
     for todo in sorted_todos:
         if todo.status == "completed":
             # Completed tasks with strikethrough - using proper Rich markup
-            console.print(f"  [bold green]✓[/bold green] [strike]{todo.content}[/strike]")
+            console.print(f"  [bold green]●[/bold green] [green strike]{todo.content}[/green strike]")
         elif todo.status == "in_progress":
             # In progress tasks
             console.print(f"  [bold yellow]◐[/bold yellow] {todo.content}")

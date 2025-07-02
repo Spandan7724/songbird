@@ -354,10 +354,37 @@ async def llm_auto_complete_todos(message: str, session_id: Optional[str] = None
         
         todos_json = "{\n  " + ",\n  ".join(todos_list) + "\n}"
         
-        # Use centralized prompt template
-        from ..prompts import get_todo_completion_prompt_template
-        prompt_template = get_todo_completion_prompt_template()
-        prompt = prompt_template.format(message=message, todos_json=todos_json)
+        # Create an intelligent prompt focused on explicit completion statements
+        prompt = f"""
+User message: "{message}"
+
+Active todos:
+{todos_json}
+
+Determine which todos are indicated as completed by this user message. Focus on:
+
+EXPLICIT COMPLETION STATEMENTS:
+- "I finished X", "X is done", "X is complete"
+- "The X is working", "X works now" 
+- "I implemented X", "I fixed X", "I built X"
+- "X is ready", "X has been completed"
+
+IMPLICIT COMPLETION INDICATORS:
+- Results/demonstrations: "The BFS algorithm outputs the correct traversal"
+- Working systems: "The authentication system now validates tokens properly"
+- Problem resolutions: "The login bug no longer occurs"
+
+WHAT NOT TO MARK AS COMPLETE:
+- Questions about todos ("How do I implement X?")
+- Requests for help ("Can you help with X?")  
+- Planning statements ("I need to work on X")
+- Partial progress ("I'm working on X")
+
+Be inclusive but accurate - if work seems genuinely done based on the message, mark it complete.
+
+Return a JSON array of completed todo IDs, e.g.: ["todo-id-1", "todo-id-2"]
+If no todos are completed, return: []
+"""
 
         try:
             # Use the LLM to analyze the message
@@ -676,3 +703,117 @@ async def auto_complete_todos_from_message(message: str, session_id: Optional[st
         except Exception:
             # If everything fails, return empty list
             return []
+
+
+async def analyze_tool_completion(
+    tool_name: str,
+    tool_args: Dict[str, Any], 
+    active_todos: List[Any],
+    llm_provider=None
+) -> List[str]:
+    """
+    Analyze if a tool execution completed any todos.
+    Uses LLM to understand the relationship between actions and todos.
+    """
+    if not active_todos or not llm_provider:
+        return []
+    
+    # Check configuration
+    from .semantic_config import get_semantic_config
+    config = get_semantic_config()
+    if config.fast_mode or not config.enable_auto_todo_completion:
+        return []
+    
+    # Build a simple description of what was done
+    action_description = _describe_tool_action(tool_name, tool_args)
+    
+    # Build todos list for LLM
+    todos_list = []
+    for todo in active_todos:
+        todos_list.append(f'"{todo.id}": "{todo.content}"')
+    
+    prompt = f"""
+Action performed: {action_description}
+
+Active todos:
+{{{', '.join(todos_list)}}}
+
+Which todos were completed by this action? Consider:
+- Creating a file with implementation completes implementation todos
+- Running code successfully completes testing/verification todos  
+- A single action can complete multiple related todos
+- File edits complete modification/fix todos
+- Shell commands that produce expected results complete execution todos
+
+Be inclusive - if the action accomplishes what a todo describes, mark it complete.
+
+Return only the JSON array of completed todo IDs, e.g.: ["todo-id-1", "todo-id-2"]
+If no todos are completed, return: []
+"""
+    
+    try:
+        messages = [{"role": "user", "content": prompt}]
+        response = await llm_provider.chat_with_messages(messages)
+        
+        # Parse response
+        import json
+        import re
+        json_match = re.search(r'\[.*?\]', response.content, re.DOTALL)
+        if json_match:
+            completed_ids = json.loads(json_match.group(0))
+            
+            # Validate that returned IDs exist in active todos
+            valid_ids = []
+            active_todo_ids = {todo.id for todo in active_todos}
+            for todo_id in completed_ids:
+                if todo_id in active_todo_ids:
+                    valid_ids.append(todo_id)
+            
+            return valid_ids
+    except Exception:
+        pass
+    
+    return []
+
+
+def _describe_tool_action(tool_name: str, tool_args: Dict[str, Any]) -> str:
+    """Create a human-readable description of what a tool did."""
+    if tool_name == 'file_create':
+        path = tool_args.get('file_path', 'unknown')
+        content_preview = tool_args.get('content', '')[:200]
+        
+        # Analyze content for more context
+        content_info = ""
+        if content_preview:
+            content_lower = content_preview.lower()
+            if 'def ' in content_lower or 'class ' in content_lower:
+                content_info = " with Python code"
+            elif 'function' in content_lower:
+                content_info = " with JavaScript/function code"
+            elif any(algo in content_lower for algo in ['bfs', 'dfs', 'sort', 'search', 'algorithm']):
+                content_info = " implementing an algorithm"
+            elif 'import' in content_lower:
+                content_info = " with imports and implementation"
+            else:
+                content_info = " with code implementation"
+        
+        return f"Created file '{path}'{content_info}. Content preview: {content_preview}..."
+    
+    elif tool_name == 'file_edit':
+        path = tool_args.get('file_path', 'unknown')
+        return f"Edited file '{path}'"
+    
+    elif tool_name == 'shell_exec':
+        cmd = tool_args.get('command', 'unknown')
+        return f"Executed command: {cmd}"
+    
+    elif tool_name == 'file_search':
+        pattern = tool_args.get('pattern', 'unknown')
+        return f"Searched for files matching pattern: {pattern}"
+    
+    elif tool_name == 'grep':
+        pattern = tool_args.get('pattern', 'unknown')
+        return f"Searched file contents for: {pattern}"
+    
+    else:
+        return f"Performed {tool_name} action with args: {tool_args}"
