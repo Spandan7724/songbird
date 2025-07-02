@@ -4,7 +4,6 @@
 import asyncio
 import litellm
 import logging
-import warnings
 from typing import AsyncGenerator, List, Dict, Any, Optional
 from rich.console import Console
 from .unified_interface import UnifiedProviderInterface
@@ -12,7 +11,6 @@ from .types import ChatResponse
 from .http_session_manager import session_manager
 
 # HTTP session management is now handled by http_session_manager
-import logging
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -275,7 +273,7 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             # Make the API call
             response = await litellm.acompletion(**completion_kwargs)
             
-            logger.debug(f"Completion successful, converting response")
+            logger.debug("Completion successful, converting response")
             return self._convert_to_songbird_response(response)
             
         except Exception as e:
@@ -734,7 +732,7 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             if self.vendor_prefix not in known_providers:
                 console.print(f"[yellow]Unknown provider prefix '{self.vendor_prefix}'[/yellow]")
                 console.print(f"[yellow]   Known providers: {', '.join(known_providers)}[/yellow]")
-                console.print(f"[yellow]   LiteLLM may still support this provider[/yellow]")
+                console.print("[yellow]   LiteLLM may still support this provider[/yellow]")
             
             # Provider-specific model validation
             if self.vendor_prefix == "openai" and not any(pattern in self.model_name for pattern in ["gpt-", "text-", "davinci"]):
@@ -776,7 +774,7 @@ class LiteLLMAdapter(UnifiedProviderInterface):
             if not value:
                 console.print(f"[yellow]Missing environment variable: {env_var}[/yellow]")
                 console.print(f"[yellow]   Provider '{self.vendor_prefix}' requires this API key to function[/yellow]")
-                console.print(f"[yellow]   LiteLLM will attempt to use the provider anyway[/yellow]")
+                console.print("[yellow]   LiteLLM will attempt to use the provider anyway[/yellow]")
             else:
                 # Mask the key for security
                 masked_key = value[:8] + "..." + value[-4:] if len(value) > 12 else value[:4] + "..."

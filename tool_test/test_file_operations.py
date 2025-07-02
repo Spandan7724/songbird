@@ -226,7 +226,7 @@ async def test_file_read_large_file():
         end_time = time.time()
         
         print(f"Reading large file: {large_temp_path}")
-        print(f"Total file lines: 100")
+        print("Total file lines: 100")
         print(f"Execution time: {end_time - start_time:.2f} seconds")
         print(f"Success: {result['success']}")
         

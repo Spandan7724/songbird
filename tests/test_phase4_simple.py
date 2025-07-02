@@ -2,7 +2,6 @@
 """Simple test script for Phase 4 infrastructure without external dependencies."""
 
 import asyncio
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -17,7 +16,7 @@ def test_configuration_management():
     print("🔧 Testing Configuration Management...")
     
     try:
-        from songbird.config.config_manager import ConfigManager, get_config_manager
+        from songbird.config.config_manager import ConfigManager
         
         # Test config manager
         config_manager = ConfigManager()

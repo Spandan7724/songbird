@@ -6,15 +6,13 @@ Tests real-world scenarios, edge cases, and integration with actual todo system.
 
 import asyncio
 import sys
-import tempfile
 import json
 from pathlib import Path
-from typing import List, Dict, Any
 
 # Add the songbird directory to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from songbird.agent.message_classifier import MessageClassifier, MessageIntent
+from songbird.agent.message_classifier import MessageClassifier
 from songbird.tools.semantic_matcher import SemanticMatcher
 from songbird.tools.semantic_config import get_semantic_config, update_semantic_config, reset_semantic_config
 from songbird.tools.todo_tools import todo_write, todo_read, _deduplicate_input_todos
@@ -398,7 +396,7 @@ async def test_message_classification_comprehensive():
         # Classify the message
         intent = await classifier.classify_message(test_case['message'])
         
-        print(f"  Classification Results:")
+        print("  Classification Results:")
         print(f"    Auto-create: {intent.should_auto_create_todos} (expected: {test_case['expected_auto_create']})")
         print(f"    Complexity: {intent.complexity_level} (expected: {test_case['expected_complexity']})")
         print(f"    Implementation: {intent.is_implementation_request}")
@@ -413,16 +411,16 @@ async def test_message_classification_comprehensive():
         confidence_valid = 0.0 <= intent.confidence <= 1.0
         
         if auto_create_correct and complexity_correct and confidence_valid:
-            print(f"    ✅ PASS")
+            print("    ✅ PASS")
             passed += 1
         else:
-            print(f"    ❌ FAIL")
+            print("    ❌ FAIL")
             if not auto_create_correct:
-                print(f"      - Auto-create mismatch")
+                print("      - Auto-create mismatch")
             if not complexity_correct:
-                print(f"      - Complexity mismatch")
+                print("      - Complexity mismatch")
             if not confidence_valid:
-                print(f"      - Invalid confidence score")
+                print("      - Invalid confidence score")
     
     print(f"\n📊 Classification Test Results: {passed}/{total} passed ({passed/total*100:.1f}%)")
     
@@ -532,10 +530,10 @@ async def test_semantic_similarity_comprehensive():
         in_range = test['expected_range'][0] <= similarity <= test['expected_range'][1]
         
         if in_range:
-            print(f"  ✅ PASS - Similarity in expected range")
+            print("  ✅ PASS - Similarity in expected range")
             passed += 1
         else:
-            print(f"  ❌ FAIL - Similarity outside expected range")
+            print("  ❌ FAIL - Similarity outside expected range")
     
     print(f"\n📊 Similarity Test Results: {passed}/{total} passed ({passed/total*100:.1f}%)")
     
@@ -582,10 +580,10 @@ async def test_priority_analysis():
         print(f"  Expected priority: {expected_priority}")
         
         if priority == expected_priority:
-            print(f"  ✅ PASS")
+            print("  ✅ PASS")
             passed += 1
         else:
-            print(f"  ❌ FAIL - Priority mismatch")
+            print("  ❌ FAIL - Priority mismatch")
     
     print(f"\n📊 Priority Test Results: {passed}/{total} passed ({passed/total*100:.1f}%)")
     
@@ -621,7 +619,7 @@ async def test_todo_integration():
         read_result = await todo_read(session_id=test_session_id)
         created_todos = read_result.get('todos', [])
         
-        print(f"  Created todos with priorities:")
+        print("  Created todos with priorities:")
         for todo in created_todos:
             print(f"    - {todo['content']} (priority: {todo['priority']})")
         
@@ -657,7 +655,7 @@ async def test_todo_integration():
         print(f"  After deduplication: {len(deduplicated)}")
         print(f"  Removed duplicates: {len(batch_with_duplicates) - len(deduplicated)}")
         
-        print(f"  Remaining todos:")
+        print("  Remaining todos:")
         for todo in deduplicated:
             print(f"    - {todo['content']}")
         

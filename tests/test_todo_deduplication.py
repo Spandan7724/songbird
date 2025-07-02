@@ -6,9 +6,6 @@ Tests various duplicate scenarios that should be caught by the enhanced similari
 
 import asyncio
 import sys
-import os
-import tempfile
-import json
 from pathlib import Path
 
 # Add the songbird directory to Python path

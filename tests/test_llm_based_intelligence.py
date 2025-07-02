@@ -11,7 +11,7 @@ from pathlib import Path
 # Add the songbird directory to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from songbird.agent.message_classifier import MessageClassifier, MessageIntent
+from songbird.agent.message_classifier import MessageClassifier
 from songbird.tools.semantic_matcher import SemanticMatcher
 from songbird.tools.semantic_config import get_semantic_config, update_semantic_config
 

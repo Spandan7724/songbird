@@ -168,7 +168,6 @@ class TestToolVisibility:
     @pytest.mark.asyncio
     async def test_tool_result_visibility_in_conversation(self, temp_workspace):
         """Test that tool results are properly visible in conversation history."""
-        from songbird.llm.providers import GeminiProvider
         from unittest.mock import AsyncMock
         
         # Create a real file for testing

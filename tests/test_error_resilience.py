@@ -8,10 +8,8 @@ import asyncio
 import tempfile
 import pytest
 import sys
-import signal
-import os
 from pathlib import Path
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, AsyncMock
 
 # Add the songbird directory to the path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -426,7 +424,6 @@ class TestGracefulShutdownResilience:
     async def test_shutdown_with_pending_operations(self):
         """Test shutdown while operations are still pending."""
         from songbird.orchestrator import SongbirdOrchestrator
-        from songbird.memory.models import Message
         
         mock_provider = AsyncMock()
         mock_provider.__class__.__name__ = "SlowProvider"

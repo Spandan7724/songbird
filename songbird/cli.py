@@ -10,7 +10,6 @@ import os
 import signal
 import sys
 import time
-import warnings
 from threading import Timer
 from typing import Optional
 from datetime import datetime
@@ -18,18 +17,15 @@ import json
 import typer
 
 # HTTP session warnings should now be resolved by proper session management
-import logging
 from rich.console import Console
 from rich.status import Status
-from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.markdown import Markdown
 from . import __version__
-from .llm.providers import get_provider, get_default_provider, get_default_provider_name, list_available_providers, get_provider_info
+from .llm.providers import get_default_provider_name, get_provider_info
 from .orchestrator import SongbirdOrchestrator
 from .memory.optimized_manager import OptimizedSessionManager
 from .memory.models import Session
-from .commands import CommandInputHandler, get_command_registry
+from .commands import CommandInputHandler
 from .memory.history_manager import MessageHistoryManager
 from .commands.loader import is_command_input, parse_command_input, load_all_commands
 from .cli_utils import (enhanced_cli, display_enhanced_help)
@@ -490,7 +486,6 @@ def replay_conversation(session: Session):
 
 async def interactive_set_default():
     """Interactive menu for setting default provider and model."""
-    from .llm.providers import get_provider_info
     from .commands.model_command import ModelCommand
     from .conversation import safe_interactive_menu
     
@@ -897,7 +892,7 @@ def chat(
     try:
         from .llm.aiohttp_session_manager import configure_google_genai_aiohttp
         configure_google_genai_aiohttp()
-    except Exception as e:
+    except Exception:
         # Non-critical error, continue without custom session configuration
         pass
     
@@ -979,10 +974,10 @@ def chat(
                     
                     # Close the loop properly
                     loop.close()
-                except Exception as e:
+                except Exception:
                     # Log cleanup error but don't crash
                     pass
-        except Exception as e:
+        except Exception:
             # Fallback to asyncio.run if manual management fails
             asyncio.run(managed_chat())
 
@@ -1222,7 +1217,6 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
 def version() -> None:
     """Show Songbird version information."""
     show_banner()
-    from . import __version__
     console.print(f"\nSongbird v{__version__}", style="bold cyan")
     console.print("Terminal-first AI coding companion", style="dim")
 

@@ -133,7 +133,7 @@ async def main():
     """Run all test scripts and provide summary."""
     print("SONGBIRD TOOL TEST SUITE")
     print(f"{'='*80}")
-    print(f"Running all tool tests")
+    print("Running all tool tests")
     print(f"Started at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Working directory: {Path.cwd()}")
     print(f"Python executable: {sys.executable}")
@@ -153,7 +153,7 @@ async def main():
             await asyncio.sleep(1)
             
         except KeyboardInterrupt:
-            print(f"\n\n⚠️  Test run interrupted by user")
+            print("\n\n⚠️  Test run interrupted by user")
             break
         except Exception as e:
             print(f"\n\n💥 Unexpected error running {script}: {e}")

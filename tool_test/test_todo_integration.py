@@ -70,9 +70,9 @@ def test_tool_schemas_format():
             # Check parameters structure
             params = function.get('parameters', {})
             if 'type' in params and params['type'] == 'object':
-                print(f"  ✅ Parameters structure is valid")
+                print("  ✅ Parameters structure is valid")
             else:
-                print(f"  ❌ Invalid parameters structure")
+                print("  ❌ Invalid parameters structure")
                 return False
             
             print()

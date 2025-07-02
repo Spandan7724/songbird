@@ -1,8 +1,7 @@
 """LLM provider registry and unified LiteLLM interface."""
 from abc import ABC, abstractmethod
-from typing import Dict, Type, List, Any, Optional
+from typing import Dict, List, Any, Optional
 import os
-import logging
 from rich.console import Console
 
 from .types import ChatResponse
@@ -86,7 +85,7 @@ def get_litellm_provider(provider_name: str, model: str = None, api_base: str = 
         if LITELLM_AVAILABLE:
             return create_litellm_provider(provider_name, model, api_base, **kwargs)
         else:
-            console.print(f"[yellow]LiteLLM not available, falling back to legacy provider[/yellow]")
+            console.print("[yellow]LiteLLM not available, falling back to legacy provider[/yellow]")
             return get_legacy_provider(provider_name, model, **kwargs)
     except Exception as e:
         console.print(f"[yellow]LiteLLM provider creation failed: {e}[/yellow]")
@@ -95,7 +94,7 @@ def get_litellm_provider(provider_name: str, model: str = None, api_base: str = 
 
 def get_legacy_provider(provider_name: str, model: str = None, **kwargs):
     """Get a legacy provider (deprecated - will be removed)."""
-    console.print(f"[red]WARNING: Legacy providers are deprecated and will be removed.[/red]")
+    console.print("[red]WARNING: Legacy providers are deprecated and will be removed.[/red]")
     console.print(f"[yellow]Please use --litellm flag for {provider_name} provider.[/yellow]")
     
     # For now, return None to force LiteLLM usage

@@ -4,7 +4,6 @@ Configuration for semantic matching and LLM-based todo intelligence.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass

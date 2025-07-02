@@ -5,7 +5,6 @@ import asyncio
 import logging
 import httpx
 from typing import Optional
-import atexit
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +107,7 @@ class HTTPSessionManager:
                         logger.debug("HTTP session reference cleared during exit")
                 except Exception as e:
                     logger.debug(f"Error during exit cleanup: {e}")
-        except Exception as e:
+        except Exception:
             # Don't let cleanup errors prevent shutdown
             pass
     

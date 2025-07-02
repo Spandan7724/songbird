@@ -6,7 +6,7 @@ Provides intelligent intent analysis for todo system decisions.
 
 import json
 import re
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from ..llm.providers import BaseProvider
 
@@ -68,7 +68,7 @@ class MessageClassifier:
                     self._cache[cache_key] = intent
                     return intent
             
-        except Exception as e:
+        except Exception:
             # Fall back to simple heuristics if LLM fails
             return self._fallback_classification(message)
         

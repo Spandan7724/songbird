@@ -6,7 +6,7 @@ Replaces hardcoded concept groups with intelligent analysis.
 
 import json
 import re
-from typing import Optional, Tuple
+from typing import Optional
 from ..llm.providers import BaseProvider
 from .semantic_config import get_semantic_config
 

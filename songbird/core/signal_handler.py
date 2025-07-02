@@ -4,7 +4,7 @@
 import signal
 import sys
 import asyncio
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict
 from rich.console import Console
 
 

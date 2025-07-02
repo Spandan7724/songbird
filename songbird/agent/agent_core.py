@@ -1,7 +1,6 @@
 # songbird/agent/agent_core.py
 """Agent Core - handles planning, decision logic, and conversation flow."""
 
-import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional, Protocol
@@ -10,11 +9,11 @@ from datetime import datetime
 from rich.text import Text
 
 from ..llm.providers import BaseProvider
-from ..ui.data_transfer import UIMessage, AgentOutput, MessageType
+from ..ui.data_transfer import UIMessage, AgentOutput
 from ..memory.models import Session, Message
 from ..memory.manager import SessionManager
 # Note: auto_complete_todos_from_message removed - now auto-completion happens after tool execution
-from .planning import AgentPlan, PlanStep, PlanStatus
+from .planning import AgentPlan, PlanStatus
 from .plan_manager import PlanManager
 from ..config.config_manager import get_config
 from .message_classifier import MessageClassifier
@@ -118,7 +117,7 @@ class AgentCore:
                         # Display the plan to the user
                         await self._display_plan(plan)
                         
-        except Exception as e:
+        except Exception:
             # If planning fails, continue without a plan
             pass
     
@@ -126,7 +125,6 @@ class AgentCore:
 
         try:
             from rich.console import Console
-            from rich.panel import Panel
             from rich.text import Text
             
             console = Console()
@@ -151,23 +149,23 @@ class AgentCore:
                 # Format step description based on action
                 if action == 'file_create':
                     file_path = args.get('file_path', 'unknown')
-                    plan_display.append(f"Create file ", style="white")
+                    plan_display.append("Create file ", style="white")
                     plan_display.append(f"{file_path}", style="cyan")
                 elif action == 'file_edit':
                     file_path = args.get('file_path', 'unknown')
-                    plan_display.append(f"Edit file ", style="white")
+                    plan_display.append("Edit file ", style="white")
                     plan_display.append(f"{file_path}", style="cyan")
                 elif action == 'file_read':
                     file_path = args.get('file_path', 'unknown')
-                    plan_display.append(f"Read file ", style="white")
+                    plan_display.append("Read file ", style="white")
                     plan_display.append(f"{file_path}", style="cyan")
                 elif action == 'shell_exec':
                     command = args.get('command', 'unknown')
-                    plan_display.append(f"Execute ", style="white")
+                    plan_display.append("Execute ", style="white")
                     plan_display.append(f"{command}", style="green")
                 elif action == 'ls':
                     path = args.get('path', 'current directory')
-                    plan_display.append(f"List directory contents of ", style="white")
+                    plan_display.append("List directory contents of ", style="white")
                     plan_display.append(f"{path}", style="cyan")
                 else:
                     # Generic action display

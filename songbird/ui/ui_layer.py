@@ -1,9 +1,8 @@
 # songbird/ui/ui_layer.py
 """UI Layer - handles all user interface concerns for Songbird."""
 
-import asyncio
 import sys
-from typing import List, Optional, Protocol
+from typing import Optional, Protocol
 from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
@@ -11,7 +10,7 @@ from InquirerPy import inquirer
 
 from .data_transfer import (
     UIMessage, UIResponse, UIChoice, UIChoiceType, 
-    MessageType, AgentOutput, ToolOutput
+    MessageType
 )
 
 
@@ -225,7 +224,6 @@ class UILayer:
     
     async def show_thinking(self, message: str) -> None:
         """Show thinking indicator."""
-        from rich.status import Status
         self._thinking_message = message  # Store the message for resuming
         if not self._thinking_status:
             self._thinking_status = self.console.status(message)
@@ -253,7 +251,6 @@ class UILayer:
             if self._thinking_status:
                 self._thinking_status.stop()
             
-            from rich.status import Status
             self._thinking_status = self.console.status(resume_message)
             self._thinking_status.start()
     

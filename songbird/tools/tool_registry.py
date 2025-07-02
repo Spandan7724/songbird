@@ -1,7 +1,6 @@
 # songbird/tools/tool_registry.py
 """Centralized tool registry for dynamic tool management and provider-agnostic schemas."""
 
-import json
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum

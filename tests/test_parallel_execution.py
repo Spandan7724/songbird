@@ -9,9 +9,8 @@ import pytest
 import asyncio
 import tempfile
 import time
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, AsyncMock
 from songbird.conversation import ConversationOrchestrator
-from songbird.tools.executor import ToolExecutor
 
 
 class TestParallelExecution:

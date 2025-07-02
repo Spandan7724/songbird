@@ -7,7 +7,6 @@ Tests todo_read and todo_write functionality.
 import asyncio
 import sys
 import time
-import tempfile
 import uuid
 from pathlib import Path
 

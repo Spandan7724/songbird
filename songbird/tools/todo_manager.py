@@ -10,8 +10,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
 
 console = Console()
 
@@ -412,7 +410,7 @@ class TodoManager:
 
 def display_todos_table(todos: List[TodoItem], title: str = "Current Tasks", show_summary: bool = True):
     if not todos:
-        console.print(f"\n[dim]No tasks found[/dim]")
+        console.print("\n[dim]No tasks found[/dim]")
         return
     
     # Sort by priority and status

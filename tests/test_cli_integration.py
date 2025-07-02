@@ -5,7 +5,6 @@ This module converts the CLI integration tests from:
 - test_real_songbird.py (CLI session warnings and real usage scenarios)
 """
 
-import asyncio
 import os
 import subprocess
 import sys

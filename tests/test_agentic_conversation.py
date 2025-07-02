@@ -6,11 +6,9 @@ Tests the core agentic loop functionality, multi-step workflows,
 parallel execution, and enhanced tool visibility.
 """
 import pytest
-import asyncio
 import tempfile
 import os
 from unittest.mock import Mock, AsyncMock, patch
-from pathlib import Path
 from songbird.conversation import ConversationOrchestrator
 from songbird.llm.types import ChatResponse
 

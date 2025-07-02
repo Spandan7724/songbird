@@ -5,10 +5,8 @@ This test validates that the timing and context fixes are working properly.
 """
 
 import pytest
-import asyncio
 from unittest.mock import Mock, AsyncMock, patch
 from songbird.agent.agent_core import AgentCore
-from songbird.tools.todo_manager import TodoManager
 from songbird.memory.models import Session
 
 
@@ -235,7 +233,6 @@ if __name__ == "__main__":
         print("✓ LLM correctly blocked from todo tools")
         
         # Test 3: Verify todo functions still work for auto-creation
-        from songbird.tools.todo_tools import todo_read, todo_write
         print("✓ Todo functions can still be imported for auto-creation")
         
         print("✓ All basic tests passed!")

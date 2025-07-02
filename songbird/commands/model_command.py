@@ -232,8 +232,6 @@ class ModelCommand(BaseCommand):
         
         try:
             # Try dynamic discovery first for LiteLLM providers
-            from ..llm.providers import get_models_for_provider
-            import asyncio
             import concurrent.futures
             
             # Event loop compatible async handling
@@ -248,7 +246,7 @@ class ModelCommand(BaseCommand):
                 self.console.print(f"[yellow]Model discovery timeout for {provider_name} - using fallback[/yellow]")
             except Exception as e:
                 if "ollama" in provider_name.lower():
-                    self.console.print(f"[yellow]Ollama not running or no models found - using fallback[/yellow]")
+                    self.console.print("[yellow]Ollama not running or no models found - using fallback[/yellow]")
                 else:
                     self.console.print(f"[yellow]Discovery failed for {provider_name}: {e} - using fallback[/yellow]")
             
@@ -474,8 +472,6 @@ class ModelCommand(BaseCommand):
         
         try:
             # Try dynamic discovery first
-            from ..llm.providers import get_models_for_provider
-            import asyncio
             import concurrent.futures
             
             # Event loop compatible async handling
@@ -490,7 +486,7 @@ class ModelCommand(BaseCommand):
                 self.console.print(f"[yellow]Model discovery timeout for {provider_name} - using fallback[/yellow]")
             except Exception as e:
                 if "ollama" in provider_name.lower():
-                    self.console.print(f"[yellow]Ollama not running or no models found - using fallback[/yellow]")
+                    self.console.print("[yellow]Ollama not running or no models found - using fallback[/yellow]")
                 else:
                     self.console.print(f"[yellow]Discovery failed for {provider_name}: {e} - using fallback[/yellow]")
             
@@ -568,11 +564,11 @@ class ModelCommand(BaseCommand):
                 except Exception as discovery_error:
                     # Provide more specific error information for Copilot
                     if "Cannot run the event loop while another loop is running" in str(discovery_error):
-                        self.console.print(f"[yellow]API discovery failed: Event loop conflict - using fallback models[/yellow]")
+                        self.console.print("[yellow]API discovery failed: Event loop conflict - using fallback models[/yellow]")
                     elif "timeout" in str(discovery_error).lower():
-                        self.console.print(f"[yellow]API discovery failed: Network timeout - using fallback models[/yellow]")
+                        self.console.print("[yellow]API discovery failed: Network timeout - using fallback models[/yellow]")
                     elif "401" in str(discovery_error) or "403" in str(discovery_error):
-                        self.console.print(f"[yellow]API discovery failed: Authentication error - check COPILOT_ACCESS_TOKEN[/yellow]")
+                        self.console.print("[yellow]API discovery failed: Authentication error - check COPILOT_ACCESS_TOKEN[/yellow]")
                     else:
                         self.console.print(f"[yellow]API discovery failed: {discovery_error}[/yellow]")
                     # Fall back to static available models (sync method)
@@ -619,7 +615,7 @@ class ModelCommand(BaseCommand):
             if model_name not in available_models:
                 self.console.print(f"[yellow]⚠️  Unknown model '{model_name}' for provider '{provider_name}'[/yellow]")
                 self.console.print(f"[yellow]   Available models: {', '.join(available_models[:3])}{'...' if len(available_models) > 3 else ''}[/yellow]")
-                self.console.print(f"[yellow]   Attempting to use model anyway with LiteLLM...[/yellow]")
+                self.console.print("[yellow]   Attempting to use model anyway with LiteLLM...[/yellow]")
             
             # Fallback: construct model string with warning
             constructed = f"{provider_name}/{model_name}"

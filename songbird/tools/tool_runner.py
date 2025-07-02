@@ -4,7 +4,7 @@
 from typing import Any, Dict, List, Optional
 from .executor import ToolExecutor
 from .tool_registry import get_tool_registry
-from ..ui.data_transfer import ToolOutput, UIMessage, MessageType
+from ..ui.data_transfer import ToolOutput, UIMessage
 
 
 class ToolRunner:

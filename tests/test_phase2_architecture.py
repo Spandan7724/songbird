@@ -6,8 +6,6 @@ import tempfile
 from unittest.mock import Mock, AsyncMock
 from songbird.orchestrator import SongbirdOrchestrator
 from songbird.llm.types import ChatResponse
-from songbird.ui.ui_layer import UILayer
-from songbird.ui.data_transfer import UIMessage
 
 
 async def test_new_architecture():

@@ -5,7 +5,7 @@ Glob tool for fast file pattern matching with minimal output.
 import glob
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from rich.console import Console
 
 console = Console()

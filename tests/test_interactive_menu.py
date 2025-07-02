@@ -4,7 +4,6 @@ Pytest tests for interactive menu functionality.
 This module converts the test from test_menu_display.py to proper pytest format.
 """
 
-import asyncio
 import pytest
 
 

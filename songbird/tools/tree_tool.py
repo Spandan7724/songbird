@@ -3,11 +3,9 @@
 Tree tool for displaying project structure in a clean tree format.
 Optimized specifically for project overview and structure visualization.
 """
-import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 from rich.console import Console
-from rich.text import Text
 
 console = Console()
 

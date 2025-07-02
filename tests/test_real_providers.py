@@ -331,7 +331,6 @@ async def test_end_to_end_provider_workflow():
 
 if __name__ == "__main__":
     # Run with specific markers for available providers
-    import subprocess
     
     # Check what's available and run appropriate tests
     pytest_args = [__file__, "-v"]

@@ -5,19 +5,13 @@ dynamic tool integration, and advanced session management.
 """
 
 import asyncio
-import pytest
 import tempfile
 import os
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock, call
-from typing import List, Dict, Any
 
-from songbird.llm.providers import get_litellm_provider, BaseProvider
-from songbird.llm.types import ChatResponse
+from songbird.llm.providers import get_litellm_provider
 from songbird.orchestrator import SongbirdOrchestrator
-from songbird.memory.models import Session
-from songbird.tools.tool_registry import ToolRegistry
 
 # Add the songbird directory to the path
 sys.path.insert(0, str(Path(__file__).parent))

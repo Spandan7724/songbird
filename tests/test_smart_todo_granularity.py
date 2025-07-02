@@ -16,7 +16,6 @@ from songbird.agent.agent_core import AgentCore
 from songbird.tools.todo_tools import analyze_tool_completion
 from songbird.tools.todo_manager import TodoManager
 from songbird.memory.models import Session
-from songbird.tools.semantic_config import get_semantic_config
 
 
 class MockProvider:
@@ -416,7 +415,7 @@ async def test_end_to_end_workflow():
                 print("  🎉 End-to-end workflow successful!")
                 return True
             else:
-                print(f"    ❌ Todo not marked as completed properly")
+                print("    ❌ Todo not marked as completed properly")
                 return False
         else:
             print(f"    ❌ Expected 1 completed todo ({todo_id}), got {completed_ids}")

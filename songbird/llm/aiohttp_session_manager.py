@@ -181,7 +181,7 @@ class AIOHTTPSessionManager:
                 AIOHTTPSessionManager._all_sessions.clear()
                 logger.debug("aiohttp session references cleared during exit")
                 
-        except Exception as e:
+        except Exception:
             # Don't let cleanup errors prevent shutdown
             pass
     

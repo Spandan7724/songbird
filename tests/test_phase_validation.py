@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Comprehensive test suite validating all phases of the Songbird repair process."""
 
-import asyncio
 import tempfile
 import pytest
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock
 
 # Add the songbird directory to the path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -47,7 +46,6 @@ class TestPhase1EventLoopFoundation:
         # The async conversion is handled internally in the conversation orchestrator
         # This is acceptable for now as Phase 1 focused on internal async fixes
         from songbird.cli import main
-        import inspect
         
         # CLI main is sync but properly delegates to async orchestrators
         assert callable(main), "CLI main() should be callable"
@@ -69,7 +67,7 @@ class TestPhase2ArchitectureSeparation:
     def test_ui_layer_module_exists(self):
         """Test UILayer module exists and has proper structure."""
         from songbird.ui.ui_layer import UILayer
-        from songbird.ui.data_transfer import UIMessage, UIResponse, AgentOutput
+        from songbird.ui.data_transfer import UIMessage, UIResponse
         
         # Test instantiation
         ui = UILayer()
@@ -258,7 +256,6 @@ class TestPhase4Infrastructure:
     async def test_optimized_session_manager(self):
         """Test OptimizedSessionManager with batch writes and idle timeout."""
         from songbird.memory.optimized_manager import OptimizedSessionManager
-        from songbird.memory.models import Message
         
         with tempfile.TemporaryDirectory() as temp_dir:
             manager = OptimizedSessionManager(
@@ -282,7 +279,6 @@ class TestPhase4Infrastructure:
     def test_configuration_management(self):
         """Test ConfigManager with environment variable overrides."""
         from songbird.config.config_manager import ConfigManager
-        import os
         
         manager = ConfigManager()
         config = manager.get_config()

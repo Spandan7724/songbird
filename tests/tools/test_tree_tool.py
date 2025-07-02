@@ -1,7 +1,6 @@
 # tests/tools/test_tree_tool.py
 import pytest
 import tempfile
-import os
 from pathlib import Path
 from songbird.tools.tree_tool import tree_display, tree_project_overview, tree_files_only, tree_dirs_only
 

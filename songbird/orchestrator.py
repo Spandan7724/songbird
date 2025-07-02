@@ -5,7 +5,7 @@ from typing import Optional
 from .llm.providers import BaseProvider
 from .llm.unified_interface import create_provider_adapter
 from .ui.ui_layer import UILayer
-from .ui.data_transfer import UIMessage, UIResponse, AgentOutput
+from .ui.data_transfer import UIMessage, AgentOutput
 from .agent.agent_core import AgentCore
 from .tools.tool_runner import ToolRunner
 from .memory.models import Session

@@ -5,7 +5,6 @@ Integration tests for the entire Songbird system.
 Tests the complete flow from CLI input to file operations,
 including provider integration, tool calling, and session management.
 """
-import asyncio
 import os
 import tempfile
 import pytest
@@ -13,11 +12,10 @@ from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock
 
 from songbird.llm.providers import (
-    get_litellm_provider, get_provider, list_available_providers, 
-    get_default_provider, BaseProvider
+    get_litellm_provider, list_available_providers, 
+    get_default_provider
 )
 from songbird.llm.types import ChatResponse
-from songbird.orchestrator import SongbirdOrchestrator
 from songbird.memory.models import Session
 from songbird.conversation import ConversationOrchestrator
 
