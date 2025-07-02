@@ -292,10 +292,6 @@ def replay_conversation(session: Session):
         elif msg.role == "assistant":
             # Check if this is a tool-calling message
             if msg.tool_calls:
-                # Show thinking message
-                console.print(
-                    "\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
-
                 # Track tool index for matching with tool results
                 tool_result_idx = i + 1
 
@@ -646,9 +642,7 @@ def main(
     provider_url: Optional[str] = typer.Option(
         None, "--provider-url", help="Custom API base URL for provider", hidden=True),
     set_default: bool = typer.Option(
-        False, "--default", help="Set default provider and model interactively"),
-    fast_mode: bool = typer.Option(
-        False, "--fast", help="Enable fast mode (disables auto-todos and LLM intelligence for faster responses)")
+        False, "--default", help="Set default provider and model interactively")
 ):
     """
     Songbird - Terminal-first AI coding companion
@@ -657,15 +651,8 @@ def main(
     Run 'songbird --continue' to continue your latest session.
     Run 'songbird --resume' to select and resume a previous session.
     Run 'songbird --default' to set your default provider and model interactively.
-    Run 'songbird --fast' to enable fast mode for better performance.
     Run 'songbird version' to show version information.
-    
-    Environment variables:
-    - SONGBIRD_FAST_MODE=1: Enable fast mode
     """
-    # Check environment variable for fast mode
-    if not fast_mode and os.getenv("SONGBIRD_FAST_MODE", "").lower() in ("1", "true", "yes"):
-        fast_mode = True
     if set_default:
         # Handle --default flag - always interactive mode
         import asyncio
@@ -712,7 +699,7 @@ def main(
         # No subcommand provided, start chat session
         chat(provider=provider,
              continue_session=continue_session, resume_session=resume_session,
-             provider_url=provider_url, fast_mode=fast_mode)
+             provider_url=provider_url)
 
 
 @app.command()
@@ -735,19 +722,11 @@ def chat(
     provider: Optional[str] = None,
     continue_session: bool = False,
     resume_session: bool = False,
-    provider_url: Optional[str] = None,
-    fast_mode: bool = False
+    provider_url: Optional[str] = None
 ) -> None:
     """Start an interactive Songbird session with AI and tools."""
     show_banner()
     
-    # Configure fast mode if requested
-    if fast_mode:
-        from .tools.semantic_config import enable_fast_mode
-        enable_fast_mode()
-        console.print("[dim]Fast mode enabled - auto-todos and LLM intelligence disabled for better performance[/dim]")
-        console.print()
-
     # Initialize optimized session manager
     session_manager = OptimizedSessionManager(working_directory=os.getcwd())
     session = None
@@ -1143,7 +1122,7 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
             
             # Create and manage status properly
             status = Status(
-                "[dim]Songbird (thinking…)[/dim]",
+                "",
                 console=console,
                 spinner="dots",
                 spinner_style="cornflower_blue"

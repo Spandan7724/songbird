@@ -328,7 +328,7 @@ async def llm_auto_complete_todos(message: str, session_id: Optional[str] = None
     """
     # Check configuration
     config = get_semantic_config()
-    if not config.enable_auto_todo_completion or config.fast_mode:
+    if not config.enable_auto_todo_completion:
         return []
     
     if not llm_provider:
@@ -721,7 +721,7 @@ async def analyze_tool_completion(
     # Check configuration
     from .semantic_config import get_semantic_config
     config = get_semantic_config()
-    if config.fast_mode or not config.enable_auto_todo_completion:
+    if not config.enable_auto_todo_completion:
         return []
     
     # Build a simple description of what was done

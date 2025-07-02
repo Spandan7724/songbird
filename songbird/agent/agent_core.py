@@ -66,7 +66,7 @@ class AgentCore:
             
             # Auto-create todos if enabled and we have a session
             # NOTE: Auto-completion now happens AFTER tool execution (better timing)
-            if self.session and not config.fast_mode:
+            if self.session:
                 # Auto-create todos for complex requests 
                 if config.enable_auto_todo_creation:
                     await self._auto_create_todos_if_needed(user_message)
@@ -678,8 +678,8 @@ Remember to follow the plan systematically. Complete the current step before mov
         from ..tools.semantic_config import get_semantic_config
         config = get_semantic_config()
         
-        # Skip if disabled or in fast mode
-        if not config.enable_auto_todo_creation or config.fast_mode:
+        # Skip if disabled
+        if not config.enable_auto_todo_creation:
             return
         
         # Quick check: skip very short messages
