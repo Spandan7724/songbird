@@ -11,7 +11,7 @@
 ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═╝╚═════╝
 </pre>
 
-**A terminal-first AI coding companion with 11 professional tools, smart task management, and persistent memory**
+**A terminal-based AI coding companion with 11 professional tools, smart task management, and persistent memory**
 
 [![CI](https://github.com/Spandan7724/songbird/workflows/CI/badge.svg)](https://github.com/Spandan7724/songbird/actions/workflows/ci.yml)
 [![PyPI version](https://badge.fury.io/py/songbird-ai.svg)](https://badge.fury.io/py/songbird-ai)
@@ -315,6 +315,16 @@ songbird                 # Uses your configured defaults
 songbird --continue      # Continue latest session
 songbird --resume        # Pick from previous sessions
 
+# Print mode - One-off commands with clean output
+songbird -p "What is 2+2?"                    # Shows tool execution + answer
+songbird -p "Create a Python hello world"     # Transparent mode (default)
+songbird -p "List files in current directory" # Shows tools used
+
+# Ultra-quiet mode - Final answer only (perfect for scripting)
+songbird -p "What is 2+2?" --quiet           # Only shows: "4"
+songbird -p "Create hello.py" --quiet         # Only shows: "File created successfully..."
+songbird -p "Current time" --quiet            # Clean output for automation
+
 # Show available commands
 songbird --help
 
@@ -448,25 +458,6 @@ python -m build
 # Test local installation
 uv tool install ./dist/songbird_ai-*.whl
 ```
-
-##  Roadmap
-
-Songbird follows a **test-driven, phase-based development** approach:
-
-- [x] **Phase 1**: LLM Provider Layer (OpenAI, Claude, Gemini, GitHub Copilot, Ollama, OpenRouter)
-- [x] **Phase 2**: File Search (enhanced with type filtering and smart detection)
-- [x] **Phase 3**: Patch Generation & Apply (with beautiful diff previews)
-- [x] **Phase 4**: Shell Execution (live streaming and cross-platform)
-- [x] **Phase 5**: Conversation Orchestrator (multi-turn with tool calling)
-- [x] **Phase 6**: Advanced UI/UX (interactive menus and rich displays)
-- [x] **Phase 7**: Session Memory (complete with project-aware storage)
-- [x] **Phase 8**: Dynamic Command System (in-chat model switching)
-- [x] **Phase 9**: Feature Parity (11 professional tools, task management)
-- [ ] **Phase 10**: MCP Server Protocol
-- [ ] **Phase 11**: Advanced Safety & Permissions
-- [ ] **Phase 12**: Plugin System
-
-
 
 
 

@@ -6,7 +6,7 @@ import litellm
 import logging
 from typing import AsyncGenerator, List, Dict, Any, Optional
 from rich.console import Console
-from .unified_interface import UnifiedProviderInterface
+# Removed legacy UnifiedProviderInterface import
 from .types import ChatResponse
 from .http_session_manager import session_manager
 
@@ -41,7 +41,7 @@ class LiteLLMModelError(LiteLLMError):
     pass
 
 
-class LiteLLMAdapter(UnifiedProviderInterface):
+class LiteLLMAdapter:
     """Unified LiteLLM adapter that replaces all provider-specific implementations."""
     
     def __init__(

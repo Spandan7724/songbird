@@ -1,21 +1,10 @@
-# songbird/conversation.py
-"""
-Legacy conversation orchestrator that delegates to the new SongbirdOrchestrator.
-This file maintains backwards compatibility while the new architecture is in use.
-"""
 import sys
 from typing import Optional
 from rich.console import Console
 from InquirerPy import inquirer
-from .llm.providers import BaseProvider
-from .memory.models import Session
 
 
 async def safe_interactive_menu(prompt: str, options: list[str], default_index: int = 0) -> int | None:
-    """
-    Async-safe interactive menu that handles all scenarios properly.
-    Returns the selected index, or None if cancelled.
-    """
     try:
         # Check if we're in an interactive terminal
         if not sys.stdin.isatty() or not sys.stdout.isatty():
@@ -35,10 +24,6 @@ async def safe_interactive_menu(prompt: str, options: list[str], default_index: 
         return None
 
 async def async_interactive_menu(prompt: str, options: list[str], default_index: int = 0) -> int:
-    """
-    Async interactive menu using InquirerPy's execute_async() method.
-    This is the CORRECT way to use InquirerPy within an existing event loop.
-    """
     try:
         result = await inquirer.select(
             message=prompt,
@@ -52,9 +37,6 @@ async def async_interactive_menu(prompt: str, options: list[str], default_index:
         return sync_interactive_menu(prompt, options, default_index)
 
 def sync_interactive_menu(prompt: str, options: list[str], default_index: int = 0) -> int:
-    """
-    Synchronous fallback interactive menu.
-    """
     try:
         result = inquirer.select(
             message=prompt,
@@ -68,9 +50,6 @@ def sync_interactive_menu(prompt: str, options: list[str], default_index: int = 
         return fallback_numbered_menu(prompt, options, default_index)
 
 def fallback_numbered_menu(prompt: str, options: list[str], default_index: int = 0) -> int:
-    """
-    Fallback numbered menu for environments where InquirerPy doesn't work.
-    """
     console = Console()
     
     # Show terminal compatibility message
@@ -110,40 +89,6 @@ def fallback_numbered_menu(prompt: str, options: list[str], default_index: int =
 
 
 def interactive_menu(prompt: str, options: list[str], default_index: int = 0) -> int:
-    """
-    Interactive menu function for backwards compatibility.
-    Delegates to the safe async menu system.
-    """
-    # For backwards compatibility, use the sync version
     return sync_interactive_menu(prompt, options, default_index)
 
 
-# Legacy ConversationOrchestrator - DEPRECATED: Use SongbirdOrchestrator instead
-class ConversationOrchestrator:
-    """DEPRECATED: Legacy orchestrator. Use SongbirdOrchestrator for new code."""
-
-    def __init__(self, provider: BaseProvider, working_directory: str = ".", session: Optional[Session] = None):
-        # Import here to avoid circular imports
-        from .orchestrator import SongbirdOrchestrator
-        
-        # Delegate to new orchestrator
-        self._orchestrator = SongbirdOrchestrator(provider, working_directory, session)
-        
-        # Create backwards compatibility interface
-        self.provider = self._orchestrator.provider
-        self.session = self._orchestrator.session
-        self.session_manager = self._orchestrator.session_manager
-        
-    @property
-    def conversation_history(self):
-        """Delegate to new orchestrator."""
-        return self._orchestrator.conversation_history
-    
-    @conversation_history.setter  
-    def conversation_history(self, value):
-        """Delegate to new orchestrator."""
-        self._orchestrator.conversation_history = value
-        
-    async def chat(self, message: str, status=None) -> str:
-        """Delegate to new orchestrator."""
-        return await self._orchestrator.chat(message, status)

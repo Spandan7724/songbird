@@ -35,7 +35,6 @@ class SemanticConfig:
     # Performance
     similarity_cache_ttl: int = 3600  # Cache time-to-live in seconds
     batch_similarity_requests: bool = False  # Future: batch multiple similarity requests
-    fast_mode: bool = False  # Disable heavy features for better performance
     parallel_llm_calls: bool = True  # Run LLM calls in parallel when possible
 
 
@@ -62,27 +61,3 @@ def reset_semantic_config() -> None:
     """Reset semantic configuration to defaults."""
     global DEFAULT_CONFIG
     DEFAULT_CONFIG = SemanticConfig()
-
-
-def enable_fast_mode() -> None:
-    """Enable fast mode - disables heavy features for better performance."""
-    update_semantic_config(
-        fast_mode=True,
-        enable_auto_todo_creation=False,
-        enable_auto_todo_completion=False,
-        enable_llm_similarity=False,
-        enable_llm_priority=False,
-        enable_llm_classification=False
-    )
-
-
-def disable_fast_mode() -> None:
-    """Disable fast mode - re-enables all features."""
-    update_semantic_config(
-        fast_mode=False,
-        enable_auto_todo_creation=True,
-        enable_auto_todo_completion=True,
-        enable_llm_similarity=True,
-        enable_llm_priority=True,
-        enable_llm_classification=True
-    )

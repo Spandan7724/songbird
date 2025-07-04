@@ -33,13 +33,15 @@ class EnhancedCLI:
 def create_enhanced_help() -> str:
     """Create enhanced help text with formatting."""
     help_text = """
-[bold cyan]Songbird AI - Terminal-First AI Coding Companion[/bold cyan]
+[bold cyan]Songbird AI - Terminal-based AI Coding Companion[/bold cyan]
 
 [bold]Basic Usage:[/bold]
   songbird                    Start interactive chat session
   songbird --continue         Continue most recent session
   songbird --resume           Select from previous sessions
   songbird --provider <name>  Use specific provider
+  songbird -p "message"       Print mode: one-off commands (use quotes for multi-word messages)
+  songbird -p "msg" --quiet   Ultra-quiet: only final answer, no tool output
 
 [bold]Available Providers:[/bold]
   openai      OpenAI GPT models (requires OPENAI_API_KEY)
@@ -58,6 +60,10 @@ def create_enhanced_help() -> str:
   songbird --provider gemini --continue
   songbird --resume
   songbird --list-providers
+  songbird -p "What is 2+2?"
+  songbird -p "List all Python files in this directory"
+  songbird -p "Create hello.py" --quiet
+  songbird -p "What's the current time?" --quiet
 
 [bold]Environment Variables:[/bold]
   OPENAI_API_KEY      OpenAI API key

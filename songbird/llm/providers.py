@@ -81,24 +81,13 @@ def get_litellm_provider(provider_name: str, model: str = None, api_base: str = 
     if provider_name == "copilot":
         return get_copilot_provider(model, **kwargs)
     
-    try:
-        if LITELLM_AVAILABLE:
-            return create_litellm_provider(provider_name, model, api_base, **kwargs)
-        else:
-            console.print("[yellow]LiteLLM not available, falling back to legacy provider[/yellow]")
-            return get_legacy_provider(provider_name, model, **kwargs)
-    except Exception as e:
-        console.print(f"[yellow]LiteLLM provider creation failed: {e}[/yellow]")
-        return get_legacy_provider(provider_name, model, **kwargs)
-
-
-def get_legacy_provider(provider_name: str, model: str = None, **kwargs):
-    """Get a legacy provider (deprecated - will be removed)."""
-    console.print("[red]WARNING: Legacy providers are deprecated and will be removed.[/red]")
-    console.print(f"[yellow]Please use --litellm flag for {provider_name} provider.[/yellow]")
+    if not LITELLM_AVAILABLE:
+        raise ImportError("LiteLLM is required but not installed. Install with: pip install litellm")
     
-    # For now, return None to force LiteLLM usage
-    raise ValueError(f"Legacy provider '{provider_name}' is no longer supported. Use --litellm flag.")
+    return create_litellm_provider(provider_name, model, api_base, **kwargs)
+
+
+
 
 
 def get_provider(name: str, use_litellm: bool = True) -> BaseProvider:

@@ -1,14 +1,14 @@
 """Message history manager for Songbird CLI input."""
 from typing import List, Optional
-from .manager import SessionManager
+from .optimized_manager import OptimizedSessionManager
 from .models import Message
 
 
 class MessageHistoryManager:
     """Manages message history for CLI input navigation."""
     
-    def __init__(self, session_manager: SessionManager):
-        """Initialize with existing SessionManager for project awareness."""
+    def __init__(self, session_manager: OptimizedSessionManager):
+        """Initialize with existing OptimizedSessionManager for project awareness."""
         self.session_manager = session_manager
         self._history_cache: Optional[List[str]] = None
         self._current_index = -1

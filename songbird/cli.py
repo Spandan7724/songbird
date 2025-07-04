@@ -1,4 +1,3 @@
-# songbird/cli.py
 from __future__ import annotations
 
 # Apply event loop cleanup patches early to prevent BaseEventLoop.__del__ errors
@@ -15,8 +14,6 @@ from typing import Optional
 from datetime import datetime
 import json
 import typer
-
-# HTTP session warnings should now be resolved by proper session management
 from rich.console import Console
 from rich.status import Status
 from rich.markdown import Markdown
@@ -31,26 +28,22 @@ from .commands.loader import is_command_input, parse_command_input, load_all_com
 from .cli_utils import (enhanced_cli, display_enhanced_help)
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich",
-                  help="Songbird - Terminal-first AI coding companion", no_args_is_help=False)
+                  help="Songbird - Terminal-based AI coding companion", no_args_is_help=False)
 console = Console()
 
 
 def render_ai_response(content: str, speaker_name: str = "Songbird"):
     """
     Render AI response content as markdown with proper formatting.
-    Avoids using # headers to prevent box formation in terminal.
     """
     if not content or not content.strip():
         return
-    
-    # Clean up the content - remove any # headers and replace with **bold**
+
     lines = content.split('\n')
     cleaned_lines = []
     
     for line in lines:
-        # Convert # headers to **bold** text to avoid boxes
         if line.strip().startswith('#'):
-            # Remove # symbols and make bold
             header_text = line.lstrip('#').strip()
             if header_text:
                 cleaned_lines.append(f"**{header_text}**")
@@ -60,11 +53,8 @@ def render_ai_response(content: str, speaker_name: str = "Songbird"):
             cleaned_lines.append(line)
     
     cleaned_content = '\n'.join(cleaned_lines)
-    
-    # Create markdown renderable
+
     md_renderable = Markdown(cleaned_content, code_theme="github-dark")
-    
-    # Print speaker name with color, then markdown content
     console.print(f"\n[medium_spring_green]{speaker_name}[/medium_spring_green]:")
     console.print(md_renderable)
 
@@ -79,30 +69,25 @@ _in_status = False     # track if we're in a status/thinking state
 
 def _flash_notice():
     global _cleanup_timer
-    # Cancel any existing cleanup timer to prevent accumulation
     if _cleanup_timer:
         _cleanup_timer.cancel()
     
-    # If we're in status mode, use console.print instead of raw output
     if _in_status:
-        # Don't try to manipulate cursor during status
         return
     
-    # Normal mode - use ANSI escape sequences
-    sys.stdout.write("\033[s")  # Save cursor position
-    sys.stdout.write("\033[A")  # Move up one line
-    sys.stdout.write("\r\033[2K")  # Clear that line
-    sys.stdout.write("\033[90mPress Ctrl+C again to exit\033[0m")  # Gray notice
-    sys.stdout.write("\033[u")  # Restore cursor position
+    sys.stdout.write("\033[s") 
+    sys.stdout.write("\033[A")  
+    sys.stdout.write("\r\033[2K") 
+    sys.stdout.write("\033[90mPress Ctrl+C again to exit\033[0m")  
+    sys.stdout.write("\033[u") 
     sys.stdout.flush()
     
-    # Schedule cleanup: clear the notice line above
     def _clear():
         if not _in_status:
-            sys.stdout.write("\033[s")  # Save cursor position
-            sys.stdout.write("\033[A")  # Move up one line
-            sys.stdout.write("\r\033[2K")  # Clear that line
-            sys.stdout.write("\033[u")  # Restore cursor position
+            sys.stdout.write("\033[s") 
+            sys.stdout.write("\033[A")  
+            sys.stdout.write("\r\033[2K")  
+            sys.stdout.write("\033[u") 
             sys.stdout.flush()
         
     _cleanup_timer = Timer(_GRACE, _clear)
@@ -112,39 +97,32 @@ def _sigint(signum, frame):
     global _last, _cleanup_timer
     now = time.monotonic()
 
-    if _last and (now - _last) < _GRACE:          # second tap → quit
-        # Cancel any pending cleanup timer before exit
+    if _last and (now - _last) < _GRACE:        
         if _cleanup_timer:
             _cleanup_timer.cancel()
         signal.signal(signal.SIGINT, signal.default_int_handler)
         
         if _in_status:
-            # Force stop the status if active
             console.print("\n[red]Interrupted![/red]")
         else:
-            # Clear the notice line if it exists
-            sys.stdout.write("\033[A\r\033[2K\033[B")  # Up, clear, down
+            sys.stdout.write("\033[A\r\033[2K\033[B") 
         
-        print()  # Clean newline before exit
+        print()  
         raise KeyboardInterrupt
 
-    # First tap handling
     if _in_status:
-        # During status/thinking, just show a console message
         console.print("\n[dim]Press Ctrl+C again to exit[/dim]")
     else:
-        # Normal input mode - erase ^C and show notice
-        sys.stdout.write("\b\b  \b\b")  # Backspace over ^C
+        sys.stdout.write("\b\b  \b\b")  
         sys.stdout.flush()
         _flash_notice()
     
-    _last = now               # start grace window
+    _last = now  
 
-# Register the signal handler
+
 signal.signal(signal.SIGINT, _sigint)
-# ------------------------------------------------------------------ #
+
 def show_banner():
-    """Display the Songbird ASCII banner in blue."""
     banner = """
 ███████╗ ██████╗ ███╗   ██╗ ██████╗ ██████╗ ██╗██████╗ ██████╗ 
 ██╔════╝██╔═══██╗████╗  ██║██╔════╝ ██╔══██╗██║██╔══██╗██╔══██╗
@@ -157,7 +135,6 @@ def show_banner():
 
 
 def format_time_ago(dt: datetime) -> str:
-    """Format a datetime as a human-readable time ago string."""
     now = datetime.now()
     diff = now - dt
 
@@ -176,7 +153,6 @@ def format_time_ago(dt: datetime) -> str:
 def _get_session_display_info(session_manager, session_id: str) -> tuple[int, str]:
     """Get user message count and last user message for session display."""
     try:
-        # Try to get from session manager's storage directory
         storage_dir = session_manager.storage_dir
         session_file = storage_dir / f"{session_id}.jsonl"
         
@@ -212,31 +188,24 @@ def display_session_selector(sessions: list[Session], session_manager) -> Option
         console.print("No previous sessions found.", style="yellow")
         return None
 
-    # Sort sessions by updated_at descending
     sessions.sort(key=lambda s: s.updated_at, reverse=True)
-    
-    # Limit sessions to avoid terminal overflow
     max_sessions = min(30, console.height - 10 if console.height > 10 else 20)
     display_sessions = sessions[:max_sessions]
     
-    # Prepare options
     options = []
     for session in display_sessions:
         created = format_time_ago(session.created_at)
         modified = format_time_ago(session.updated_at)
         
-        # Get actual message count and last user message from session file
         user_msg_count, last_user_msg = _get_session_display_info(session_manager, session.id)
-        
-        # Use last user message as summary, truncated
+
         if last_user_msg:
-            summary = last_user_msg[:35]  # Slightly shorter to make room for provider info
+            summary = last_user_msg[:35]  
             if len(last_user_msg) > 35:
                 summary += "..."
         else:
             summary = "Empty session"
         
-        # Add provider type information
         provider_info = ""
         if session.provider_config:
             provider = session.provider_config.get("provider", "unknown")
@@ -252,7 +221,6 @@ def display_session_selector(sessions: list[Session], session_manager) -> Option
     if len(sessions) > max_sessions:
         console.print(f"[yellow]Showing {max_sessions} most recent sessions out of {len(sessions)} total[/yellow]\n")
     
-    # Use interactive menu (synchronous)
     from .conversation import interactive_menu
     try:
         selected_idx = interactive_menu(
@@ -271,17 +239,13 @@ def display_session_selector(sessions: list[Session], session_manager) -> Option
 
 
 def replay_conversation(session: Session):
-    """Replay the conversation history to show it as the user saw it."""
-    # Import here to avoid circular dependency
     from .tools.file_operations import display_diff_preview
 
-    # Group messages with their tool calls and results
     i = 0
     while i < len(session.messages):
         msg = session.messages[i]
 
         if msg.role == "system":
-            # Skip system messages in replay
             i += 1
             continue
 
@@ -290,16 +254,9 @@ def replay_conversation(session: Session):
             i += 1
 
         elif msg.role == "assistant":
-            # Check if this is a tool-calling message
             if msg.tool_calls:
-                # Show thinking message
-                console.print(
-                    "\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
-
-                # Track tool index for matching with tool results
                 tool_result_idx = i + 1
 
-                # Process each tool call
                 for tool_call in msg.tool_calls:
                     function_name = tool_call["function"]["name"]
                     arguments = tool_call["function"]["arguments"]
@@ -525,18 +482,18 @@ async def interactive_set_default():
     try:
         model_cmd = ModelCommand()
         if selected_provider == "copilot":
-            models = model_cmd._get_copilot_models()
+            models = await model_cmd._get_copilot_models()
         else:
-            models = model_cmd._get_litellm_models(selected_provider)
+            models = await model_cmd._get_litellm_models(selected_provider)
     except Exception as e:
         console.print(f"[yellow]Could not get models for {selected_provider}: {e}[/yellow]")
         # Use provider's default model
-        set_default_provider_and_model(selected_provider, None)
+        await set_default_provider_and_model(selected_provider, None)
         return
     
     if not models:
         console.print(f"[yellow]No models available for {selected_provider}[/yellow]")
-        set_default_provider_and_model(selected_provider, None)
+        await set_default_provider_and_model(selected_provider, None)
         return
     
     # Add cancel option
@@ -553,10 +510,10 @@ async def interactive_set_default():
         return
     
     selected_model = models[model_idx]
-    set_default_provider_and_model(selected_provider, selected_model)
+    await set_default_provider_and_model(selected_provider, selected_model)
 
 
-def set_default_provider_and_model(provider_name: str, model_name: Optional[str] = None):
+async def set_default_provider_and_model(provider_name: str, model_name: Optional[str] = None):
     """Set the default provider and optionally model in configuration."""
     from .config.config_manager import get_config_manager
     from .commands.model_command import ModelCommand
@@ -598,9 +555,9 @@ def set_default_provider_and_model(provider_name: str, model_name: Optional[str]
     # Validate model for the provider (optional - just warn if invalid)
     try:
         if provider_name == "copilot":
-            available_models = model_cmd._get_copilot_models()
+            available_models = await model_cmd._get_copilot_models()
         else:
-            available_models = model_cmd._get_litellm_models(provider_name)
+            available_models = await model_cmd._get_litellm_models(provider_name)
         
         if model_name and available_models and model_name not in available_models:
             console.print(f"[yellow]Warning: Model '{model_name}' may not be available for {provider_name}[/yellow]")
@@ -632,11 +589,85 @@ def set_default_provider_and_model(provider_name: str, model_name: Optional[str]
     console.print("[dim]Use 'songbird' without --provider to use these defaults[/dim]")
 
 
+async def execute_print_mode(message: str, provider: Optional[str] = None, provider_url: Optional[str] = None, ultra_quiet: bool = False):
+    try:
+        # Determine provider
+        provider_name = provider or get_default_provider_name()
+        
+        # Get default model from configuration
+        model_name = None
+        try:
+            from .config.config_manager import get_config_manager
+            config_manager = get_config_manager()
+            config = config_manager.get_config()
+            model_name = config.llm.default_models.get(provider_name)
+        except Exception:
+            pass
+        
+        if not model_name:
+            # Fallback to hardcoded defaults
+            fallback_models = {
+                "openai": "gpt-4o",
+                "claude": "claude-3-5-sonnet-20241022",
+                "gemini": "gemini-2.0-flash",
+                "ollama": "qwen2.5-coder:7b",   
+                "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+                "copilot": "gpt-4o"
+            }
+            model_name = fallback_models.get(provider_name, fallback_models.get("ollama"))
+        
+        # Create provider instance with quiet mode
+        if provider_name == "copilot":
+            from .llm.providers import get_copilot_provider
+            provider_instance = get_copilot_provider(model=model_name, quiet=True)
+        else:
+            # Use LiteLLM for all other providers
+            from .llm.providers import get_litellm_provider
+            provider_instance = get_litellm_provider(
+                provider_name=provider_name,
+                model=model_name,
+                api_base=provider_url,
+                session_metadata=None
+            )
+
+        orchestrator = SongbirdOrchestrator(
+            provider=provider_instance,
+            working_directory=os.getcwd(),
+            session=None, 
+            ui_layer=None, 
+            quiet_mode=True  
+        )
+        
+        if ultra_quiet:
+            import sys
+            import io
+            from contextlib import redirect_stdout, redirect_stderr
+            
+            captured_output = io.StringIO()
+            with redirect_stdout(captured_output), redirect_stderr(captured_output):
+                response = await orchestrator.chat_single_message(message)
+            
+          
+            if response and response.strip():
+                print(response)
+        else:
+            
+            response = await orchestrator.chat_single_message(message)
+           
+        
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
     provider: Optional[str] = typer.Option(
-        None, "--provider", "-p", help="LLM provider to use (openai, claude, gemini, ollama, openrouter)"),
+        None, "--provider", help="LLM provider to use (openai, claude, gemini, ollama, openrouter)"),
     list_providers: bool = typer.Option(
         False, "--list-providers", help="List available providers and exit"),
     continue_session: bool = typer.Option(
@@ -647,25 +678,28 @@ def main(
         None, "--provider-url", help="Custom API base URL for provider", hidden=True),
     set_default: bool = typer.Option(
         False, "--default", help="Set default provider and model interactively"),
-    fast_mode: bool = typer.Option(
-        False, "--fast", help="Enable fast mode (disables auto-todos and LLM intelligence for faster responses)")
+    print_mode: Optional[str] = typer.Option(
+        None, "--print", "-p", help='Print mode: execute single command and output result only. Use quotes for multi-word messages: -p "your message"'),
+    quiet_mode: bool = typer.Option(
+        False, "--quiet", "-q", help="Suppress tool output in print mode, show only final answer")
 ):
     """
-    Songbird - Terminal-first AI coding companion
+    Songbird - Terminal-based AI coding companion
     
     Run 'songbird' to start an interactive chat session with AI and tools.
     Run 'songbird --continue' to continue your latest session.
     Run 'songbird --resume' to select and resume a previous session.
     Run 'songbird --default' to set your default provider and model interactively.
-    Run 'songbird --fast' to enable fast mode for better performance.
+    Run 'songbird -p "message"' for one-off commands with clean output (use quotes for multi-word messages).
+    Run 'songbird -p "message" --quiet' for ultra-clean output (final answer only).
     Run 'songbird version' to show version information.
-    
-    Environment variables:
-    - SONGBIRD_FAST_MODE=1: Enable fast mode
     """
-    # Check environment variable for fast mode
-    if not fast_mode and os.getenv("SONGBIRD_FAST_MODE", "").lower() in ("1", "true", "yes"):
-        fast_mode = True
+    # Validate that --quiet can only be used with --print
+    if quiet_mode and not print_mode:
+        console.print("[red]Error: --quiet can only be used with --print mode[/red]")
+        console.print("Usage: songbird --print --quiet \"your message\"")
+        raise typer.Exit(1)
+    
     if set_default:
         # Handle --default flag - always interactive mode
         import asyncio
@@ -673,9 +707,7 @@ def main(
         return
     
     if list_providers:
-        from .llm.providers import get_provider_info
-        
-        provider_info = get_provider_info()
+        provider_info = get_provider_info(use_discovery=True, quiet=False)
         default = get_default_provider_name()
         
         console.print("Available LLM Providers:", style="bold cornflower_blue")
@@ -708,11 +740,17 @@ def main(
         
         return
 
+    if print_mode:
+        # Handle print mode - single command execution
+        import asyncio
+        asyncio.run(execute_print_mode(print_mode, provider, provider_url, quiet_mode))
+        return
+
     if ctx.invoked_subcommand is None:
         # No subcommand provided, start chat session
         chat(provider=provider,
              continue_session=continue_session, resume_session=resume_session,
-             provider_url=provider_url, fast_mode=fast_mode)
+             provider_url=provider_url)
 
 
 @app.command()
@@ -727,7 +765,8 @@ def default(
         asyncio.run(interactive_set_default())
     else:
         # Direct mode with provider and optional model
-        set_default_provider_and_model(provider.lower(), model)
+        import asyncio
+        asyncio.run(set_default_provider_and_model(provider.lower(), model))
 
 
 @app.command(hidden=True)
@@ -735,19 +774,11 @@ def chat(
     provider: Optional[str] = None,
     continue_session: bool = False,
     resume_session: bool = False,
-    provider_url: Optional[str] = None,
-    fast_mode: bool = False
+    provider_url: Optional[str] = None
 ) -> None:
     """Start an interactive Songbird session with AI and tools."""
     show_banner()
     
-    # Configure fast mode if requested
-    if fast_mode:
-        from .tools.semantic_config import enable_fast_mode
-        enable_fast_mode()
-        console.print("[dim]Fast mode enabled - auto-todos and LLM intelligence disabled for better performance[/dim]")
-        console.print()
-
     # Initialize optimized session manager
     session_manager = OptimizedSessionManager(working_directory=os.getcwd())
     session = None
@@ -940,10 +971,12 @@ def chat(
         # Start chat loop with proper event loop management
         async def managed_chat():
             try:
+                
                 await _chat_loop(orchestrator, command_registry, command_input_handler,
                                 provider_name, provider_instance)
             finally:
                 # Ensure cleanup even if chat loop exits unexpectedly
+                
                 try:
                     from .core.event_loop_manager import ensure_clean_shutdown
                     ensure_clean_shutdown()
@@ -1143,7 +1176,7 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
             
             # Create and manage status properly
             status = Status(
-                "[dim]Songbird (thinking…)[/dim]",
+                "",
                 console=console,
                 spinner="dots",
                 spinner_style="cornflower_blue"
@@ -1215,17 +1248,13 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
 
 @app.command()
 def version() -> None:
-    """Show Songbird version information."""
-    show_banner()
-    console.print(f"\nSongbird v{__version__}", style="bold cyan")
-    console.print("Terminal-first AI coding companion", style="dim")
+    from .version import show_version
+    show_version()
 
 
 @app.command()
 def help() -> None:
-    """Show comprehensive help information."""
     display_enhanced_help(console)
-
 
 
 
