@@ -64,6 +64,7 @@ class AgentConfig:
     adaptive_termination: bool = True
 
 
+
 @dataclass
 class SongbirdConfig:
     """Main configuration class for Songbird."""
@@ -140,6 +141,7 @@ class ConfigManager:
             
             # Auto-apply for file operations
             "SONGBIRD_AUTO_APPLY": ("tools", "auto_apply", self._str_to_bool),
+            
         }
         
         for env_var, config_path in env_mapping.items():

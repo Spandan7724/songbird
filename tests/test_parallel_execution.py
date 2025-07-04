@@ -10,7 +10,7 @@ import asyncio
 import tempfile
 import time
 from unittest.mock import Mock, AsyncMock
-from songbird.conversation import ConversationOrchestrator
+from songbird.orchestrator import SongbirdOrchestrator
 
 
 class TestParallelExecution:
@@ -26,7 +26,7 @@ class TestParallelExecution:
     def orchestrator(self, temp_workspace):
         """Orchestrator for testing parallel execution."""
         mock_provider = Mock()
-        return ConversationOrchestrator(mock_provider, temp_workspace)
+        return SongbirdOrchestrator(mock_provider, temp_workspace)
     
     def test_parallel_safe_tool_detection(self, orchestrator):
         """Test detection of tools that can run in parallel safely."""

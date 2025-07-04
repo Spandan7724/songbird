@@ -84,9 +84,8 @@ class OptimizedSessionManager:
     def _start_background_flush(self):
         """Start the background flush task."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                self._flush_task = loop.create_task(self._background_flush_loop())
+            loop = asyncio.get_running_loop()
+            self._flush_task = loop.create_task(self._background_flush_loop())
         except RuntimeError:
             # No event loop running, flush will be manual only
             pass

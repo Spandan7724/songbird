@@ -11,13 +11,13 @@ import json
 import logging
 from typing import Dict, Any, List, Optional, AsyncGenerator
 import httpx
-from .unified_interface import UnifiedProviderInterface
+# Removed legacy UnifiedProviderInterface import
 from .types import ChatResponse
 
 logger = logging.getLogger(__name__)
 
 
-class CopilotProvider(UnifiedProviderInterface):
+class CopilotProvider:
     """Direct GitHub Copilot API provider implementation."""
     
     def __init__(self, model: str = "gpt-4o", **kwargs):

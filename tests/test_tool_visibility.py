@@ -11,7 +11,7 @@ import tempfile
 import os
 from unittest.mock import Mock, patch
 from pathlib import Path
-from songbird.conversation import ConversationOrchestrator
+from songbird.orchestrator import SongbirdOrchestrator
 from songbird.tools.executor import ToolExecutor
 
 
@@ -33,7 +33,7 @@ class TestToolVisibility:
     def orchestrator(self, temp_workspace):
         """Orchestrator for testing tool visibility."""
         mock_provider = Mock()
-        return ConversationOrchestrator(mock_provider, temp_workspace)
+        return SongbirdOrchestrator(mock_provider, temp_workspace)
 
     def test_file_read_result_formatting(self, orchestrator):
         """Test file read results are formatted for better LLM visibility."""
@@ -177,7 +177,7 @@ class TestToolVisibility:
         mock_provider = Mock()
         mock_provider.chat_with_messages = AsyncMock()
         
-        orchestrator = ConversationOrchestrator(mock_provider, temp_workspace)
+        orchestrator = SongbirdOrchestrator(mock_provider, temp_workspace)
         
         # Create a real tool result
         executor = ToolExecutor(temp_workspace)

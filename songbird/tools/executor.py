@@ -4,7 +4,7 @@ Tool execution system for handling LLM function calls.
 """
 import asyncio
 from typing import Dict, Any, List
-from .tool_registry import get_tool_function, get_llm_tool_schemas
+from .tool_registry import get_tool_function, get_llm_tool_schemas, get_tool_registry
 from ..config.config_manager import get_config
 
 
@@ -49,6 +49,7 @@ class ToolExecutor:
             # Inject configuration-based timeouts if not specified
             if tool_name == "shell_exec" and "timeout" not in arguments:
                 arguments["timeout"] = config.tools.shell_timeout
+            
                 
             # Execute the tool function
             result = await tool_function(**arguments)
@@ -86,3 +87,15 @@ class ToolExecutor:
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get list of available tool schemas for LLM (excluding task management tools)."""
         return get_llm_tool_schemas()
+    
+    def get_tool_statistics(self) -> Dict[str, Any]:
+        """Get statistics about available tools."""
+        tool_registry = get_tool_registry()
+        tool_info = tool_registry.get_tool_info()
+        
+        return {
+            "total_tools": tool_info["total_tools"],
+            "categories": tool_info["categories"],
+            "parallel_safe": tool_info["parallel_safe"],
+            "destructive": tool_info["destructive"]
+        }

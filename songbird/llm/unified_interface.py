@@ -1,8 +1,7 @@
 # songbird/llm/unified_interface.py
-"""Unified interface for standardizing provider interactions and tool call formats."""
+"""Provider adapter for capability detection and management."""
 
-from typing import Dict, List, Any, Optional
-from abc import ABC, abstractmethod
+from typing import Dict, List, Any
 
 try:
     from ..tools.tool_registry import get_tool_registry
@@ -24,85 +23,8 @@ except ImportError:
             self.tool_calls = tool_calls
 
 
-class UnifiedToolCall:
-    """Standardized tool call format used internally by Songbird."""
-    
-    def __init__(self, id: str, function_name: str, arguments: Dict[str, Any]):
-        self.id = id
-        self.function_name = function_name
-        self.arguments = arguments
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary format."""
-        return {
-            "id": self.id,
-            "function": {
-                "name": self.function_name,
-                "arguments": self.arguments
-            }
-        }
-    
-    @classmethod
-    def from_provider_format(cls, tool_call: Dict[str, Any], provider: str) -> 'UnifiedToolCall':
-        """Create from provider-specific tool call format."""
-        if provider in ["openai", "openrouter", "ollama"]:
-            return cls(
-                id=tool_call.get("id", ""),
-                function_name=tool_call.get("function", {}).get("name", ""),
-                arguments=tool_call.get("function", {}).get("arguments", {})
-            )
-        elif provider == "claude":
-            return cls(
-                id=tool_call.get("id", ""),
-                function_name=tool_call.get("function", {}).get("name", ""),
-                arguments=tool_call.get("function", {}).get("arguments", {})
-            )
-        elif provider == "gemini":
-            return cls(
-                id=tool_call.get("id", ""),
-                function_name=tool_call.get("function", {}).get("name", ""),
-                arguments=tool_call.get("function", {}).get("arguments", {})
-            )
-        else:
-            raise ValueError(f"Unknown provider format: {provider}")
-
-
-class UnifiedProviderInterface(ABC):
-    """Unified interface that all providers should implement for consistency."""
-    
-    @abstractmethod
-    def get_provider_name(self) -> str:
-        """Get the provider name."""
-        pass
-    
-    @abstractmethod
-    def get_model_name(self) -> str:
-        """Get the current model name."""
-        pass
-    
-    @abstractmethod
-    def format_tools_for_provider(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Format tools for this provider's specific format."""
-        pass
-    
-    @abstractmethod
-    def parse_response_to_unified(self, response: Any) -> ChatResponse:
-        """Parse provider response to unified ChatResponse format."""
-        pass
-    
-    def get_supported_features(self) -> Dict[str, bool]:
-        """Get supported features for this provider."""
-        return {
-            "function_calling": True,
-            "streaming": False,
-            "usage_tracking": True,
-            "temperature_control": True,
-            "max_tokens_control": True
-        }
-
-
 class ProviderAdapter:
-    """Adapter that provides unified interface for all providers."""
+    """Adapter that provides unified interface for provider capabilities."""
     
     def __init__(self, provider_instance):
         self.provider = provider_instance
@@ -125,6 +47,8 @@ class ProviderAdapter:
             return "gemini"
         elif "openrouter" in class_name:
             return "openrouter"
+        elif "copilot" in class_name:
+            return "copilot"
         else:
             return "unknown"
     
@@ -134,23 +58,6 @@ class ProviderAdapter:
             return self.tool_registry.get_llm_schemas(self.provider_name)
         else:
             return []  # Return empty list if tool registry not available
-    
-    def standardize_tool_calls(self, tool_calls: Optional[List[Dict[str, Any]]]) -> List[UnifiedToolCall]:
-        """Convert provider-specific tool calls to unified format."""
-        if not tool_calls:
-            return []
-        
-        unified_calls = []
-        for tool_call in tool_calls:
-            try:
-                unified_call = UnifiedToolCall.from_provider_format(tool_call, self.provider_name)
-                unified_calls.append(unified_call)
-            except Exception as e:
-                # Log error but continue processing other tool calls
-                print(f"Warning: Failed to standardize tool call: {e}")
-                continue
-        
-        return unified_calls
     
     def prepare_messages_for_provider(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Prepare messages for provider-specific format requirements."""
@@ -176,7 +83,7 @@ class ProviderAdapter:
             return processed_messages
         
         else:
-            # OpenAI, Ollama, OpenRouter use standard format
+            # OpenAI, Ollama, OpenRouter, Copilot use standard format
             return messages
     
     def create_unified_response(self, response: Any) -> ChatResponse:
@@ -220,7 +127,7 @@ class ProviderAdapter:
                 "requires_api_key": False,
                 "cost_per_token": 0.0
             })
-        elif self.provider_name in ["openai", "claude", "gemini", "openrouter"]:
+        elif self.provider_name in ["openai", "claude", "gemini", "openrouter", "copilot"]:
             base_capabilities.update({
                 "local_execution": False,
                 "requires_api_key": True,
@@ -236,13 +143,14 @@ class ProviderAdapter:
             "openai": 32768,  # GPT-4 turbo
             "claude": 200000,  # Claude 3.5 Sonnet
             "gemini": 32768,  # Gemini 2.0 Flash
-            "openrouter": 32768  # Varies by model
+            "openrouter": 32768,  # Varies by model
+            "copilot": 32768  # GitHub Copilot models
         }
         return context_lengths.get(self.provider_name, 8192)
     
     def _get_tool_call_format(self) -> str:
         """Get the tool call format used by this provider."""
-        if self.provider_name in ["openai", "ollama", "openrouter"]:
+        if self.provider_name in ["openai", "ollama", "openrouter", "copilot"]:
             return "openai_tools"
         elif self.provider_name == "claude":
             return "anthropic_tools"
@@ -250,60 +158,6 @@ class ProviderAdapter:
             return "gemini_functions"
         else:
             return "unknown"
-
-
-class UnifiedProviderManager:
-    """Manager for working with providers through a unified interface."""
-    
-    def __init__(self):
-        self.adapters: Dict[str, ProviderAdapter] = {}
-    
-    def register_provider(self, provider_instance, alias: Optional[str] = None) -> ProviderAdapter:
-        """Register a provider instance and return its adapter."""
-        adapter = ProviderAdapter(provider_instance)
-        key = alias or adapter.provider_name
-        self.adapters[key] = adapter
-        return adapter
-    
-    def get_adapter(self, provider_key: str) -> Optional[ProviderAdapter]:
-        """Get a provider adapter by key."""
-        return self.adapters.get(provider_key)
-    
-    def get_all_capabilities(self) -> Dict[str, Dict[str, Any]]:
-        """Get capabilities for all registered providers."""
-        return {
-            key: adapter.get_provider_capabilities()
-            for key, adapter in self.adapters.items()
-        }
-    
-    def compare_providers(self) -> Dict[str, Any]:
-        """Compare all registered providers across key metrics."""
-        comparison = {
-            "providers": [],
-            "function_calling_support": {},
-            "context_lengths": {},
-            "local_vs_remote": {},
-            "api_key_requirements": {}
-        }
-        
-        for key, adapter in self.adapters.items():
-            caps = adapter.get_provider_capabilities()
-            comparison["providers"].append(key)
-            comparison["function_calling_support"][key] = caps["supports_function_calling"]
-            comparison["context_lengths"][key] = caps["max_context_length"]
-            comparison["local_vs_remote"][key] = caps.get("local_execution", False)
-            comparison["api_key_requirements"][key] = caps.get("requires_api_key", True)
-        
-        return comparison
-
-
-# Global unified manager instance
-_unified_manager = UnifiedProviderManager()
-
-
-def get_unified_manager() -> UnifiedProviderManager:
-    """Get the global unified provider manager."""
-    return _unified_manager
 
 
 def create_provider_adapter(provider_instance) -> ProviderAdapter:

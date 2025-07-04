@@ -5,7 +5,7 @@ Simple agentic tests to verify basic functionality.
 import pytest
 import tempfile
 from unittest.mock import Mock, AsyncMock
-from songbird.conversation import ConversationOrchestrator
+from songbird.orchestrator import SongbirdOrchestrator
 from songbird.llm.types import ChatResponse
 
 
@@ -32,7 +32,7 @@ class TestSimpleAgentic:
     @pytest.fixture
     def orchestrator(self, mock_provider, temp_workspace):
         """Simple orchestrator."""
-        return ConversationOrchestrator(mock_provider, temp_workspace)
+        return SongbirdOrchestrator(mock_provider, temp_workspace)
     
     @pytest.mark.asyncio
     async def test_simple_chat_no_tools(self, orchestrator, mock_provider):

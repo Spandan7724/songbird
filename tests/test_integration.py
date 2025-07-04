@@ -17,7 +17,7 @@ from songbird.llm.providers import (
 )
 from songbird.llm.types import ChatResponse
 from songbird.memory.models import Session
-from songbird.conversation import ConversationOrchestrator
+from songbird.orchestrator import SongbirdOrchestrator
 
 
 class TestSongbirdIntegration:
@@ -83,7 +83,7 @@ class TestSongbirdIntegration:
         mock_provider.chat_with_messages.side_effect = responses
         
         # Test the full agentic workflow
-        orchestrator = ConversationOrchestrator(mock_provider, temp_workspace)
+        orchestrator = SongbirdOrchestrator(mock_provider, temp_workspace)
         
         response = await orchestrator.chat(
             "Please create a file called test.txt with 'Hello Integration Test' and then show me the directory contents"
@@ -147,7 +147,7 @@ class TestSongbirdIntegration:
         
         mock_provider.chat_with_messages.side_effect = responses
         
-        orchestrator = ConversationOrchestrator(mock_provider, temp_workspace)
+        orchestrator = SongbirdOrchestrator(mock_provider, temp_workspace)
         
         response = await orchestrator.chat("Read nonexistent.txt")
         
@@ -182,7 +182,7 @@ class TestSongbirdIntegration:
         """Test integration with real Ollama server (if available)."""
         try:
             provider = get_litellm_provider(model="qwen2.5-coder:7b")
-            orchestrator = ConversationOrchestrator(provider, temp_workspace)
+            orchestrator = SongbirdOrchestrator(provider, temp_workspace)
             
             # Simple test to verify Ollama integration
             response = await orchestrator.chat("Please create a simple Python file called hello.py that prints 'Hello Ollama!'")
@@ -253,7 +253,7 @@ class TestSongbirdIntegration:
         
         mock_provider.chat_with_messages.side_effect = [parallel_response, final_response]
         
-        orchestrator = ConversationOrchestrator(mock_provider, temp_workspace)
+        orchestrator = SongbirdOrchestrator(mock_provider, temp_workspace)
         
         # Enable debug to see parallel execution
         with patch.dict(os.environ, {"SONGBIRD_DEBUG_TOOLS": "true"}):
@@ -289,20 +289,18 @@ class TestSongbirdIntegration:
     def test_enhanced_system_prompt_integration(self, temp_workspace):
         """Test that the enhanced system prompt is properly integrated."""
         mock_provider = Mock()
-        orchestrator = ConversationOrchestrator(mock_provider, temp_workspace)
+        orchestrator = SongbirdOrchestrator(mock_provider, temp_workspace)
         
         # Verify system prompt contains agentic instructions
-        history = orchestrator.get_conversation_history()
-        system_msg = next(msg for msg in history if msg["role"] == "system")
-        
-        system_content = system_msg["content"]
+        # In the new architecture, system prompt is stored in agent.system_prompt
+        system_content = orchestrator.agent.system_prompt
         
         # Key agentic instructions should be present
         agentic_keywords = [
-            "NEVER ASSUME OR GUESS",
-            "ALWAYS USE TOOLS",
-            "IMMEDIATE ACTION REQUIRED",
-            "VERIFICATION BEFORE ANY CLAIMS",
+            "TOOL-FIRST APPROACH",
+            "PLAN-THEN-EXECUTE", 
+            "SYSTEMATIC EXECUTION",
+            "VERIFICATION",
             "file_create", "file_edit", "file_read"  # Tool examples
         ]
         
@@ -317,7 +315,7 @@ class TestSongbirdIntegration:
         
         # Create a session for persistence testing
         session = Session()
-        orchestrator = ConversationOrchestrator(mock_provider, temp_workspace, session=session)
+        orchestrator = SongbirdOrchestrator(mock_provider, temp_workspace, session=session)
         
         # Mock simple workflow
         response = ChatResponse(

@@ -189,21 +189,21 @@ async def test_model_command_integration():
     cmd = ModelCommand()
     
     # Test LiteLLM model discovery
-    models = cmd._get_litellm_models("gemini")
+    models = await cmd._get_litellm_models("gemini")
     assert isinstance(models, list)
     assert len(models) > 0
     
     # Test legacy model discovery
-    models = cmd._get_available_models("gemini")
+    models = await cmd._get_available_models("gemini")
     assert isinstance(models, list)
     assert len(models) > 0
     
     # Test Copilot model discovery
-    models = cmd._get_litellm_models("copilot")
+    models = await cmd._get_litellm_models("copilot")
     assert isinstance(models, list)
     assert len(models) > 0
     
-    models = cmd._get_available_models("copilot")
+    models = await cmd._get_available_models("copilot")
     assert isinstance(models, list)
     assert len(models) > 0
 

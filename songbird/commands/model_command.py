@@ -41,9 +41,9 @@ class ModelCommand(BaseCommand):
         
         # Get available models - all providers use LiteLLM except Copilot
         if provider_name == "copilot":
-            models = self._get_copilot_models()
+            models = await self._get_copilot_models()
         else:
-            models = self._get_litellm_models(provider_name)
+            models = await self._get_litellm_models(provider_name)
             
         if not models:
             return CommandResult(
@@ -206,21 +206,17 @@ class ModelCommand(BaseCommand):
                 data={"new_model": selected_model}
             )
 
-    def _run_async_discovery(self, provider_name: str) -> List[str]:
-        """Run async model discovery in a clean event loop context."""
+    async def _run_async_discovery(self, provider_name: str) -> List[str]:
+        """Run async model discovery using existing event loop."""
         import asyncio
         from ..llm.providers import get_models_for_provider
         
-        async def discover():
-            return await asyncio.wait_for(
-                get_models_for_provider(provider_name, use_cache=True), 
-                timeout=5.0
-            )
-        
-        # Run in a new event loop to avoid conflicts
-        return asyncio.run(discover())
+        return await asyncio.wait_for(
+            get_models_for_provider(provider_name, use_cache=True), 
+            timeout=5.0
+        )
 
-    def _get_available_models(self, provider_name: str) -> List[str]:
+    async def _get_available_models(self, provider_name: str) -> List[str]:
         """Get available models for a provider using dynamic discovery.
         
         Note: This method is now redundant with _get_litellm_models since all providers
@@ -228,21 +224,15 @@ class ModelCommand(BaseCommand):
         """
         # Special handling for Copilot since it's a custom provider
         if provider_name == "copilot":
-            return self._get_copilot_models()
+            return await self._get_copilot_models()
         
         try:
-            # Try dynamic discovery first for LiteLLM providers
-            import concurrent.futures
-            
-            # Event loop compatible async handling
+            # Try dynamic discovery first for LiteLLM providers using proper async/await
             try:
-                # Use ThreadPoolExecutor to run async code from sync context
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(self._run_async_discovery, provider_name)
-                    discovered_models = future.result(timeout=8.0)  # Slightly longer timeout for thread overhead
-                    if discovered_models:
-                        return discovered_models
-            except concurrent.futures.TimeoutError:
+                discovered_models = await self._run_async_discovery(provider_name)
+                if discovered_models:
+                    return discovered_models
+            except asyncio.TimeoutError:
                 self.console.print(f"[yellow]Model discovery timeout for {provider_name} - using fallback[/yellow]")
             except Exception as e:
                 if "ollama" in provider_name.lower():
@@ -464,25 +454,19 @@ class ModelCommand(BaseCommand):
         
         return True, ""
     
-    def _get_litellm_models(self, provider_name: str) -> List[str]:
+    async def _get_litellm_models(self, provider_name: str) -> List[str]:
         """Get available models for LiteLLM provider using dynamic discovery."""
         # Special handling for Copilot since it uses a custom provider
         if provider_name == "copilot":
-            return self._get_copilot_models()
+            return await self._get_copilot_models()
         
         try:
-            # Try dynamic discovery first
-            import concurrent.futures
-            
-            # Event loop compatible async handling
+            # Try dynamic discovery first using proper async/await
             try:
-                # Use ThreadPoolExecutor to run async code from sync context
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(self._run_async_discovery, provider_name)
-                    discovered_models = future.result(timeout=8.0)  # Slightly longer timeout for thread overhead
-                    if discovered_models:
-                        return discovered_models
-            except concurrent.futures.TimeoutError:
+                discovered_models = await self._run_async_discovery(provider_name)
+                if discovered_models:
+                    return discovered_models
+            except asyncio.TimeoutError:
                 self.console.print(f"[yellow]Model discovery timeout for {provider_name} - using fallback[/yellow]")
             except Exception as e:
                 if "ollama" in provider_name.lower():
@@ -535,7 +519,7 @@ class ModelCommand(BaseCommand):
         }
         return fallback_models.get(provider_name, [])
     
-    def _get_copilot_models(self) -> List[str]:
+    async def _get_copilot_models(self) -> List[str]:
         """Get available GitHub Copilot models using the custom provider with API discovery."""
         try:
             from ..llm.providers import get_copilot_provider
@@ -543,41 +527,27 @@ class ModelCommand(BaseCommand):
             
             provider = get_copilot_provider(quiet=True)
             
-            # Use async model discovery to get the full list from API
-            def run_async_discovery():
-                try:
-                    # Check if we're already in an event loop
-                    try:
-                        loop = asyncio.get_running_loop()
-                        # We're in an event loop, use ThreadPoolExecutor
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(asyncio.run, provider.get_models())
-                            models_data = future.result(timeout=10)
-                            # Extract model IDs from the API response
-                            return [model.get("id", "") for model in models_data if model.get("id")]
-                    except RuntimeError:
-                        # No event loop running, safe to create one
-                        models_data = asyncio.run(provider.get_models())
-                        # Extract model IDs from the API response
-                        return [model.get("id", "") for model in models_data if model.get("id")]
-                except Exception as discovery_error:
-                    # Provide more specific error information for Copilot
-                    if "Cannot run the event loop while another loop is running" in str(discovery_error):
-                        self.console.print("[yellow]API discovery failed: Event loop conflict - using fallback models[/yellow]")
-                    elif "timeout" in str(discovery_error).lower():
-                        self.console.print("[yellow]API discovery failed: Network timeout - using fallback models[/yellow]")
-                    elif "401" in str(discovery_error) or "403" in str(discovery_error):
-                        self.console.print("[yellow]API discovery failed: Authentication error - check COPILOT_ACCESS_TOKEN[/yellow]")
-                    else:
-                        self.console.print(f"[yellow]API discovery failed: {discovery_error}[/yellow]")
-                    # Fall back to static available models (sync method)
-                    try:
-                        return provider.get_available_models()
-                    except Exception:
-                        return ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
+            # Use proper async model discovery 
+            try:
+                models_data = await asyncio.wait_for(provider.get_models(), timeout=10.0)
+                # Extract model IDs from the API response
+                discovered_models = [model.get("id", "") for model in models_data if model.get("id")]
+                if discovered_models:
+                    return discovered_models
+            except asyncio.TimeoutError:
+                self.console.print("[yellow]API discovery failed: Network timeout - using fallback models[/yellow]")
+            except Exception as discovery_error:
+                # Provide more specific error information for Copilot
+                if "401" in str(discovery_error) or "403" in str(discovery_error):
+                    self.console.print("[yellow]API discovery failed: Authentication error - check COPILOT_ACCESS_TOKEN[/yellow]")
+                else:
+                    self.console.print(f"[yellow]API discovery failed: {discovery_error} - using fallback models[/yellow]")
             
-            discovered_models = run_async_discovery()
+            # Fall back to static available models (sync method)
+            try:
+                discovered_models = provider.get_available_models()
+            except Exception:
+                discovered_models = ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet"]
             
             if discovered_models:
                 self.console.print(f"[dim]Found {len(discovered_models)} Copilot models via API discovery[/dim]")

@@ -11,8 +11,8 @@ from rich.text import Text
 from ..llm.providers import BaseProvider
 from ..ui.data_transfer import UIMessage, AgentOutput
 from ..memory.models import Session, Message
-from ..memory.manager import SessionManager
-# Note: auto_complete_todos_from_message removed - now auto-completion happens after tool execution
+from ..memory.optimized_manager import OptimizedSessionManager
+
 from .planning import AgentPlan, PlanStatus
 from .plan_manager import PlanManager
 from ..config.config_manager import get_config
@@ -42,12 +42,14 @@ class AgentCore:
         provider: BaseProvider, 
         tool_runner: ToolRunnerProtocol,
         session: Optional[Session] = None,
-        session_manager: Optional[SessionManager] = None
+        session_manager: Optional[OptimizedSessionManager] = None,
+        quiet_mode: bool = False
     ):
         self.provider = provider
         self.tool_runner = tool_runner
         self.session = session
         self.session_manager = session_manager
+        self.quiet_mode = quiet_mode
         self.conversation_history: List[Dict[str, Any]] = []
         self.current_plan: Optional[AgentPlan] = None
         self.plan_manager = PlanManager()
@@ -122,7 +124,11 @@ class AgentCore:
             pass
     
     async def _display_plan(self, plan) -> None:
-
+        """Display the execution plan to the user."""
+        # Skip plan display if quiet mode is enabled
+        if self.quiet_mode:
+            return
+            
         try:
             from rich.console import Console
             from rich.text import Text
@@ -835,13 +841,7 @@ Return ONLY a JSON array in this format:
         
         return []  # Return empty list if generation fails
     
-    # Note: Old batch auto-completion system removed - now using real-time completion during tool execution
-    
-    # Note: _build_completion_context removed - using real-time completion instead
-    
-    # Note: _unified_llm_auto_complete removed - using real-time analyze_tool_completion instead
-    
-    # Note: _describe_tool_accomplishment_with_context and _get_user_context removed - using real-time completion instead
+
     
     def _describe_tool_accomplishment(self, tool_name: str, result: Dict[str, Any]) -> Optional[str]:
         """Convert a successful tool execution into a detailed, context-rich accomplishment description."""
@@ -952,7 +952,7 @@ Return ONLY a JSON array in this format:
             context = f" - {success_msg[:50]}" if success_msg else ""
             return f"Successfully executed {tool_name}{context}"
     
-    # Note: _match_accomplishments_to_todos removed - replaced by _unified_llm_auto_complete
+
     
     def _sanitize_for_json(self, obj: Any) -> Any:
         """Recursively sanitize objects to make them JSON-serializable."""

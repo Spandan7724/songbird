@@ -41,12 +41,23 @@ class UIProtocol(Protocol):
 class UILayer:
     """Rich-based UI layer for terminal interaction."""
     
-    def __init__(self, console: Optional[Console] = None):
+    def __init__(self, console: Optional[Console] = None, quiet_mode: bool = False):
         self.console = console or Console()
+        self.quiet_mode = quiet_mode
         self._thinking_status = None
         
     async def display_message(self, message: UIMessage) -> None:
         """Display a message with appropriate styling."""
+        # In quiet mode, only show final assistant responses
+        if self.quiet_mode:
+            if message.message_type == MessageType.ASSISTANT:
+                # Show only the content without any formatting in quiet mode
+                print(message.content)
+            elif message.message_type == MessageType.ERROR:
+                self._display_error_message(message)
+            return
+            
+        # Normal mode - show all messages
         if message.message_type == MessageType.USER:
             self._display_user_message(message)
         elif message.message_type == MessageType.ASSISTANT:
@@ -224,6 +235,10 @@ class UILayer:
     
     async def show_thinking(self, message: str) -> None:
         """Show thinking indicator."""
+        # Suppress thinking indicators in quiet mode
+        if self.quiet_mode:
+            return
+            
         self._thinking_message = message  # Store the message for resuming
         if not self._thinking_status:
             self._thinking_status = self.console.status(message)
@@ -231,6 +246,10 @@ class UILayer:
     
     async def hide_thinking(self) -> None:
         """Hide thinking indicator."""
+        # No-op in quiet mode since we don't start thinking indicators
+        if self.quiet_mode:
+            return
+            
         if self._thinking_status:
             self._thinking_status.stop()
             self._thinking_status = None
