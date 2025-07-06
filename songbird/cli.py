@@ -24,7 +24,8 @@ from .memory.optimized_manager import OptimizedSessionManager
 from .memory.models import Session
 from .commands import CommandInputHandler
 from .memory.history_manager import MessageHistoryManager
-from .commands.loader import is_command_input, parse_command_input, load_all_commands
+from .commands.loader import is_command_input, parse_command_input, load_all_commands, is_bash_mode_input, parse_bash_input
+from .tools.shell_exec import shell_exec_safe
 from .cli_utils import (enhanced_cli, display_enhanced_help)
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich",
@@ -1091,6 +1092,24 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
                 break
                 
             if not user_input.strip():
+                continue
+            
+            # Handle bash mode commands (starting with !)
+            if is_bash_mode_input(user_input):
+                bash_command = parse_bash_input(user_input)
+                if bash_command:
+                    try:
+                        # Execute shell command using existing shell_exec tool
+                        result = await shell_exec_safe(
+                            command=bash_command,
+                            working_dir=orchestrator.working_directory,
+                            show_live_output=True
+                        )
+                            
+                    except Exception as e:
+                        console.print(f"[red]Error executing bash command: {e}[/red]")
+                else:
+                    console.print("[yellow]Empty bash command[/yellow]")
                 continue
                 
             # Handle commands

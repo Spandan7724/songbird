@@ -1,6 +1,3 @@
-# songbird/tools/tool_runner.py
-"""ToolRunner - clean interface for tool execution without conversation logic."""
-
 from typing import Any, Dict, List, Optional
 from .executor import ToolExecutor
 from .tool_registry import get_tool_registry
@@ -8,7 +5,6 @@ from ..ui.data_transfer import ToolOutput, UIMessage
 
 
 class ToolRunner:
-    """Clean interface for tool execution with smart status management."""
     
     def __init__(self, working_directory: str = ".", session_id: Optional[str] = None, ui_layer=None):
         self.working_directory = working_directory
@@ -17,24 +13,17 @@ class ToolRunner:
         self.tool_executor = ToolExecutor(working_directory, session_id)
     
     async def execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a tool with smart status management."""
         try:
-            # Check if tool produces output and pause thinking indicator
             should_pause_thinking = self._should_pause_thinking_for_tool(tool_name)
             
             if should_pause_thinking and self.ui_layer:
                 await self.ui_layer.pause_thinking()
             
-            # Execute the tool using the existing ToolExecutor
             result = await self.tool_executor.execute_tool(tool_name, args)
             
-            # Resume thinking indicator if we paused it and more processing is expected
             if should_pause_thinking and self.ui_layer:
-                # Only resume if we're in a context where more processing is expected
-                # (This will be controlled by the orchestrator)
                 pass
             
-            # Ensure result is properly formatted
             if not isinstance(result, dict):
                 result = {"success": False, "error": "Invalid result format"}
             
@@ -49,23 +38,18 @@ class ToolRunner:
             }
     
     def _should_pause_thinking_for_tool(self, tool_name: str) -> bool:
-        """Check if a tool produces output and should pause the thinking indicator."""
         tool_registry = get_tool_registry()
         tool_def = tool_registry.get_tool(tool_name)
         return tool_def.produces_output if tool_def else False
     
     def get_available_tools(self) -> List[Dict[str, Any]]:
-        """Get list of available tools with their schemas."""
         return self.tool_executor.get_available_tools()
     
     async def execute_tools_parallel(self, tool_calls: List[Dict[str, Any]]) -> List[ToolOutput]:
-        """Execute multiple tools in parallel where safe."""
-        # For now, execute sequentially. In Phase 4 we can add intelligent parallel execution
         results = []
         
         for tool_call in tool_calls:
             try:
-                # Parse tool call
                 if isinstance(tool_call, dict) and "function" in tool_call:
                     function_name = tool_call["function"]["name"]
                     arguments = tool_call["function"]["arguments"]
@@ -76,10 +60,8 @@ class ToolRunner:
                     results.append(ToolOutput.error(f"Invalid tool call format: {type(tool_call)}"))
                     continue
                 
-                # Execute tool
                 result = await self.execute_tool(function_name, arguments)
                 
-                # Create tool output
                 if result.get("success", True):
                     display_message = self._create_tool_display_message(function_name, result)
                     results.append(ToolOutput.success_result(result, display_message))
@@ -93,8 +75,6 @@ class ToolRunner:
         return results
     
     def _create_tool_display_message(self, tool_name: str, result: Dict[str, Any]) -> UIMessage:
-        """Create a display message for tool execution result."""
-        # Create appropriate display message based on tool type
         if tool_name == "file_read":
             file_path = result.get("file_path", "unknown")
             content_length = len(result.get("content", ""))
@@ -127,7 +107,6 @@ class ToolRunner:
             message_content = f"Todo management: {len(todos)} tasks"
             
         else:
-            # Generic message for unknown tools
             message_content = f"Executed {tool_name}"
         
         return UIMessage.tool_result(
@@ -137,14 +116,11 @@ class ToolRunner:
         )
     
     def can_execute_in_parallel(self, tool_names: List[str]) -> bool:
-        """Check if tools can be executed in parallel safely using registry."""
         registry = get_tool_registry()
         
-        # Check if all tools are parallel-safe according to registry
         for tool_name in tool_names:
             tool_def = registry.get_tool(tool_name)
             if not tool_def or not tool_def.parallel_safe:
                 return False
         
-        # All tools are marked as parallel-safe
         return True

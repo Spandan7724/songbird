@@ -43,3 +43,16 @@ def parse_command_input(text: str) -> tuple[str, str]:
     args = parts[1] if len(parts) > 1 else ""
     
     return command_name, args
+
+
+def is_bash_mode_input(text: str) -> bool:
+    """Check if the input text is bash mode (starts with !)."""
+    return text.strip().startswith('!')
+
+
+def parse_bash_input(text: str) -> str:
+    """Parse bash input and return the command to execute."""
+    if not text.startswith('!'):
+        return ""
+    
+    return text[1:].strip()

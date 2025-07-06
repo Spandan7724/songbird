@@ -356,7 +356,6 @@ def _print_tree_recursive(tree_dict: Dict, prefix: str, parent_is_last: bool, sh
 
 
 def _display_minimal_format(entries: List[Dict[str, Any]], long_format: bool, file_count: int, dir_count: int, recursive: bool = False):
-    """Display directory entries in minimal format or tree format for recursive."""
     if not entries:
         console.print("[dim]empty[/dim]")
         return
@@ -369,7 +368,7 @@ def _display_minimal_format(entries: List[Dict[str, Any]], long_format: bool, fi
         summary_parts.append(f"{file_count} files")
     
     if summary_parts:
-        console.print(f"[green]{', '.join(summary_parts)}[/green]")
+        console.print(f"[sky_blue2]{', '.join(summary_parts)}[/sky_blue2]")
     
     console.print()
     
@@ -387,7 +386,7 @@ def _display_minimal_format(entries: List[Dict[str, Any]], long_format: bool, fi
                 
             if entry["is_dir"]:
                 type_char = "D"
-                style = "blue"
+                style = "sky_blue2"
             elif entry["is_symlink"]:
                 type_char = "L"
                 style = "cyan"
@@ -421,64 +420,8 @@ def _format_size(size_bytes: int) -> str:
 
 # Additional LS utilities
 
-async def ls_tree(path: str = ".", max_depth: int = 3, show_hidden: bool = False) -> Dict[str, Any]:
-    """
-    Display directory tree structure.
-    
-    Args:
-        path: Directory path to show tree for
-        max_depth: Maximum depth to traverse
-        show_hidden: Whether to show hidden files
-        
-    Returns:
-        Dictionary with tree structure
-    """
-    console.print(f"[dim]Tree view of {path}[/dim]\n")
-    
-    result = await ls_directory(
-        path=path,
-        recursive=True,
-        max_depth=max_depth,
-        show_hidden=show_hidden
-    )
-    
-    if result["success"] and result["entries"]:
-        # Custom tree display
-        _display_tree_structure(result["entries"])
-    
-    return result
-
-
-def _display_tree_structure(entries: List[Dict[str, Any]]):
-    """Display entries as a tree structure."""
-    # Group by depth
-    max_depth = max(e.get("depth", 0) for e in entries)
-    
-    for entry in entries:
-        depth = entry.get("depth", 0)
-        indent = "│   " * depth if depth > 0 else ""
-        
-        if depth > 0:
-            # Replace last part with tree connector
-            indent = indent[:-4] + "├── "
-        
-        if entry["is_dir"]:
-            console.print(f"{indent}[blue]{entry['name']}/[/blue]")
-        else:
-            console.print(f"{indent}{entry['name']}")
-
 
 async def ls_size_summary(path: str = ".", show_hidden: bool = False) -> Dict[str, Any]:
-    """
-    Show directory size summary.
-    
-    Args:
-        path: Directory path to analyze
-        show_hidden: Whether to include hidden files
-        
-    Returns:
-        Dictionary with size analysis
-    """
     result = await ls_directory(
         path=path,
         show_hidden=show_hidden,
