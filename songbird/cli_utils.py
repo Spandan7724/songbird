@@ -1,6 +1,3 @@
-# songbird/cli_utils.py
-"""CLI utilities with minimal required functions."""
-
 from typing import Optional, List
 from rich.console import Console
 from rich.panel import Panel

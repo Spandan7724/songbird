@@ -1,7 +1,5 @@
-# songbird/tools/grep_tool.py
-"""
-Grep tool for advanced content search with regex support.
-"""
+# grep tool for advanced content search with regex support.
+
 import re
 import asyncio
 import shutil
@@ -28,26 +26,7 @@ async def grep_search(
     include_line_numbers: bool = True,
     include_hidden: bool = False
 ) -> Dict[str, Any]:
-    """
-    Search for patterns in file contents with advanced options.
-    
-    Args:
-        pattern: Text pattern or regex to search for
-        directory: Directory to search in (default: current directory)
-        file_pattern: Glob pattern to filter files (e.g., "*.py", "*.{js,ts}")
-        case_sensitive: Whether search is case sensitive (default: False)
-        whole_word: Whether to match whole words only (default: False)
-        regex: Whether pattern is a regular expression (default: False)
-        context_lines: Number of context lines to show around matches (default: 0)
-        max_results: Maximum number of results to return (default: 100)
-        include_line_numbers: Whether to include line numbers (default: True)
-        include_hidden: Whether to search hidden files (default: False)
-        
-    Returns:
-        Dictionary with search results and metadata
-    """
     try:
-        # Resolve directory path
         dir_path = Path(directory).resolve()
         if not dir_path.exists():
             return {
@@ -62,7 +41,6 @@ async def grep_search(
             console.print(f"[dim]File pattern: {file_pattern}[/dim]")
         console.print()
         
-        # Try ripgrep first for better performance
         rg_path = shutil.which("rg")
         if rg_path:
             result = await _grep_with_ripgrep(
@@ -76,7 +54,6 @@ async def grep_search(
                 regex, context_lines, max_results, include_line_numbers, include_hidden
             )
         
-        # Display results
         if result["success"]:
             _display_grep_results(result)
         
@@ -96,43 +73,29 @@ async def _grep_with_ripgrep(
     context_lines: int, max_results: int, include_line_numbers: bool,
     include_hidden: bool
 ) -> Dict[str, Any]:
-    """Use ripgrep for fast searching."""
+
     
     try:
-        # Build ripgrep command
         cmd = [shutil.which("rg"), "--json", "--no-heading"]
         
-        # Search options
         if not case_sensitive:
             cmd.append("--ignore-case")
-        
         if whole_word:
-            cmd.append("--word-regexp")
-        
+            cmd.append("--word-regexp")        
         if not regex:
-            cmd.append("--fixed-strings")
-        
+            cmd.append("--fixed-strings")        
         if include_hidden:
-            cmd.append("--hidden")
-        
+            cmd.append("--hidden")        
         if context_lines > 0:
             cmd.extend(["--before-context", str(context_lines)])
-            cmd.extend(["--after-context", str(context_lines)])
-        
+            cmd.extend(["--after-context", str(context_lines)])        
         if include_line_numbers:
             cmd.append("--line-number")
         
-        # File pattern filtering
         if file_pattern:
             cmd.extend(["--glob", file_pattern])
-        
-        # Limit results
         cmd.extend(["--max-count", str(max_results)])
-        
-        # Add pattern and directory
         cmd.extend([pattern, str(directory)])
-        
-        # Execute command
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -193,14 +156,13 @@ async def _grep_with_python(
     context_lines: int, max_results: int, include_line_numbers: bool,
     include_hidden: bool
 ) -> Dict[str, Any]:
-    """Python fallback for grep functionality."""
+    # Python fallback for grep functionality
     
     import glob
     
     matches = []
     
     try:
-        # Compile regex pattern
         regex_flags = 0 if case_sensitive else re.IGNORECASE
         
         if regex:
@@ -208,28 +170,23 @@ async def _grep_with_python(
                 pattern = f"\\b{pattern}\\b"
             compiled_pattern = re.compile(pattern, regex_flags)
         else:
-            # Escape special regex characters for literal search
             escaped_pattern = re.escape(pattern)
             if whole_word:
                 escaped_pattern = f"\\b{escaped_pattern}\\b"
             compiled_pattern = re.compile(escaped_pattern, regex_flags)
         
-        # Find files to search
         files_to_search = []
         
         if file_pattern:
-            # Use glob pattern
             search_pattern = str(directory / "**" / file_pattern)
             files_to_search = [Path(f) for f in glob.glob(search_pattern, recursive=True)]
         else:
-            # Search all files
             for root, dirs, files in os.walk(directory):
                 # Skip hidden directories unless requested
                 if not include_hidden:
                     dirs[:] = [d for d in dirs if not d.startswith('.')]
                 
                 for file in files:
-                    # Skip hidden files unless requested
                     if not include_hidden and file.startswith('.'):
                         continue
                     
@@ -261,12 +218,10 @@ async def _grep_with_python(
                             "type": "match"
                         }
                         
-                        # Add context lines if requested
                         if context_lines > 0:
                             context_before = []
                             context_after = []
                             
-                            # Before context
                             for i in range(max(0, line_num - context_lines - 1), line_num - 1):
                                 if i < len(lines):
                                     context_before.append({
@@ -275,7 +230,6 @@ async def _grep_with_python(
                                         "type": "context"
                                     })
                             
-                            # After context
                             for i in range(line_num, min(len(lines), line_num + context_lines)):
                                 if i < len(lines):
                                     context_after.append({
@@ -290,7 +244,6 @@ async def _grep_with_python(
                         matches.append(match)
                         
             except Exception:
-                # Skip files that can't be read
                 continue
         
         return {
@@ -311,7 +264,6 @@ async def _grep_with_python(
 
 
 def _display_grep_results(result: Dict[str, Any]):
-    """Display grep results in a formatted table."""
     matches = result.get("matches", [])
     
     if not matches:
@@ -320,7 +272,6 @@ def _display_grep_results(result: Dict[str, Any]):
     
     pattern = result.get("pattern", "")
     
-    # Group matches by file
     files_with_matches = {}
     for match in matches:
         file_path = match["file"]
@@ -328,7 +279,6 @@ def _display_grep_results(result: Dict[str, Any]):
             files_with_matches[file_path] = []
         files_with_matches[file_path].append(match)
     
-    # Create table
     table = Table(
         title=f"Found {len(matches)} matches for '{pattern}' in {len(files_with_matches)} files"
     )
@@ -336,16 +286,13 @@ def _display_grep_results(result: Dict[str, Any]):
     table.add_column("Line", style="green", justify="right", width=6)
     table.add_column("Content", style="white", ratio=1)
     
-    # Add matches to table
     for file_path, file_matches in files_with_matches.items():
         for i, match in enumerate(file_matches):
-            # Only show filename on first match for each file
             file_display = file_path if i == 0 else ""
             
             line_num = match.get("line_number", "")
             line_display = str(line_num) if line_num else "—"
             
-            # Highlight pattern in text
             text = match["text"]
             highlighted_text = _highlight_pattern_in_text(text, pattern)
             
@@ -355,35 +302,31 @@ def _display_grep_results(result: Dict[str, Any]):
                 highlighted_text
             )
             
-            # Add context lines if available
             context_after = match.get("context_after", [])
-            for context in context_after[:2]:  # Limit context display
+            for context in context_after[:2]:
                 table.add_row(
                     "",
                     f"[dim]{context.get('line_number', '')}[/dim]",
                     f"[dim]{context['text']}[/dim]"
                 )
         
-        # Add separator between files if there are multiple files
         if len(files_with_matches) > 1 and file_path != list(files_with_matches.keys())[-1]:
             table.add_row("", "", "[dim]...[/dim]")
     
-    # Show truncation warning if needed
+
     if result.get("truncated"):
         table.add_row(
             "[dim]...[/dim]",
             "[dim]...[/dim]",
             "[dim]More results available (increase max_results)[/dim]"
         )
-    
-    # Display in a panel
+
     panel = Panel(table, border_style="white", padding=(1, 2))
     console.print(panel)
     
-    # Show summary
+
     console.print(f"\n[bold]Summary:[/bold] {len(matches)} matches across {len(files_with_matches)} files")
-    
-    # Show file breakdown if multiple files
+
     if len(files_with_matches) > 1:
         file_summary = []
         for file_path, file_matches in list(files_with_matches.items())[:5]:
@@ -395,12 +338,8 @@ def _display_grep_results(result: Dict[str, Any]):
 
 
 def _highlight_pattern_in_text(text: str, pattern: str) -> str:
-    """Highlight search pattern in text with color."""
-    # Simple case-insensitive highlighting
-    # In a real implementation, you'd want to handle regex patterns properly
     
     try:
-        # Create a case-insensitive search
         escaped_pattern = re.escape(pattern)
         highlighted = re.sub(
             f"({escaped_pattern})",
@@ -410,11 +349,8 @@ def _highlight_pattern_in_text(text: str, pattern: str) -> str:
         )
         return highlighted
     except Exception:
-        # If highlighting fails, return original text
         return text
 
-
-# Additional grep utilities
 
 async def grep_count(
     pattern: str,
@@ -422,28 +358,15 @@ async def grep_count(
     file_pattern: Optional[str] = None,
     case_sensitive: bool = False
 ) -> Dict[str, Any]:
-    """
-    Count matches without returning content.
-    
-    Args:
-        pattern: Pattern to search for
-        directory: Directory to search in
-        file_pattern: File pattern filter
-        case_sensitive: Whether search is case sensitive
-        
-    Returns:
-        Dictionary with count information
-    """
     result = await grep_search(
         pattern=pattern,
         directory=directory,
         file_pattern=file_pattern,
         case_sensitive=case_sensitive,
-        max_results=10000  # High limit for counting
+        max_results=10000  
     )
     
     if result["success"]:
-        # Group by file for count summary
         file_counts = {}
         for match in result["matches"]:
             file_path = match["file"]
@@ -470,20 +393,7 @@ async def grep_replace_preview(
     case_sensitive: bool = False,
     regex: bool = False
 ) -> Dict[str, Any]:
-    """
-    Preview what a grep replace operation would do.
-    
-    Args:
-        pattern: Pattern to search for
-        replacement: Replacement text
-        directory: Directory to search in
-        file_pattern: File pattern filter
-        case_sensitive: Whether search is case sensitive
-        regex: Whether pattern is regex
-        
-    Returns:
-        Dictionary with preview information
-    """
+
     # First, find all matches
     result = await grep_search(
         pattern=pattern,
@@ -491,7 +401,7 @@ async def grep_replace_preview(
         file_pattern=file_pattern,
         case_sensitive=case_sensitive,
         regex=regex,
-        max_results=50  # Limit for preview
+        max_results=50  
     )
     
     if not result["success"]:
@@ -501,19 +411,17 @@ async def grep_replace_preview(
     preview_items = []
     for match in result["matches"]:
         original_text = match["text"]
-        
-        # Perform replacement (simplified - in practice you'd handle regex properly)
+    
         if regex:
             try:
                 flags = 0 if case_sensitive else re.IGNORECASE
                 new_text = re.sub(pattern, replacement, original_text, flags=flags)
             except Exception:
-                new_text = original_text  # Keep original on error
+                new_text = original_text
         else:
             if case_sensitive:
                 new_text = original_text.replace(pattern, replacement)
             else:
-                # Case-insensitive replacement
                 import re
                 new_text = re.sub(re.escape(pattern), replacement, original_text, flags=re.IGNORECASE)
         

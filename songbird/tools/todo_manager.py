@@ -1,8 +1,4 @@
-# songbird/tools/todo_manager.py
-"""
-Todo management system for Songbird sessions.
 
-"""
 import json
 import os
 import uuid
@@ -10,12 +6,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from rich.console import Console
+from .semantic_matcher import SemanticMatcher
 
 console = Console()
 
 
 class TodoItem:
-    """Represents a single todo item."""
+    # Represents a single todo item
     
     def __init__(self, content: str, priority: str = "medium", 
                  status: str = "pending", id: Optional[str] = None,
@@ -31,7 +28,7 @@ class TodoItem:
         self.session_id = session_id
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
+        # Convert to dictionary for JSON serialization
         return {
             "id": self.id,
             "content": self.content,
@@ -44,7 +41,7 @@ class TodoItem:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TodoItem':
-        """Create from dictionary."""
+        # Create from dictionary
         return cls(
             id=data["id"],
             content=data["content"],
@@ -56,7 +53,7 @@ class TodoItem:
         )
     
     def update(self, **kwargs):
-        """Update item properties."""
+        # Update item properties
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
@@ -64,11 +61,13 @@ class TodoItem:
 
 
 class TodoManager:
-    """Manages todos for Songbird sessions."""
+    # Manages todos for Songbird sessions
     
-    def __init__(self, working_directory: str = ".", session_id: Optional[str] = None):
+    def __init__(self, working_directory: str = ".", session_id: Optional[str] = None, 
+                 semantic_matcher: Optional[SemanticMatcher] = None):
         self.working_directory = Path(working_directory).resolve()
         self.session_id = session_id
+        self.semantic_matcher = semantic_matcher
         self.storage_path = self._get_storage_path()
         self._todos: List[TodoItem] = []
         self._load_todos()
@@ -92,7 +91,7 @@ class TodoManager:
             return legacy_storage_dir / "todos.json"
     
     def _find_project_root(self) -> Path:
-        """Find the VCS root (git) or use current directory."""
+        # Find the VCS root (git) or use current directory
         try:
             import subprocess
             result = subprocess.run(
@@ -107,10 +106,7 @@ class TodoManager:
             return self.working_directory
     
     def migrate_from_project_storage(self) -> bool:
-        """
-        Migrate todos from legacy project-based storage to new conversation-based storage.
-        Returns True if migration was performed, False if no migration needed.
-        """
+
         if not self.session_id:
             return False  # No session ID, can't migrate
         
@@ -143,8 +139,6 @@ class TodoManager:
             return False
     
     def _load_todos(self):
-        """Load todos from storage, attempting migration if needed."""
-        # Try migration from legacy storage first
         if not self.storage_path.exists() and self.session_id:
             self.migrate_from_project_storage()
         
@@ -161,9 +155,7 @@ class TodoManager:
             self._todos = []
     
     def _save_todos(self):
-        """Save todos to storage."""
         try:
-            # Ensure directory exists
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
             
             with open(self.storage_path, 'w', encoding='utf-8') as f:
@@ -171,11 +163,10 @@ class TodoManager:
         except Exception as e:
             console.print(f"[red]Error saving todos: {e}[/red]")
     
-    def add_todo(self, content: str, priority: str = "medium", use_semantic_id: bool = True) -> TodoItem:
-        """Add a new todo item with semantic ID generation."""
-        # Generate semantic ID if requested
+    async def add_todo(self, content: str, priority: str = "medium", use_semantic_id: bool = True) -> TodoItem:
+
         if use_semantic_id:
-            semantic_id = self.generate_semantic_id(content)
+            semantic_id = await self.generate_semantic_id(content)
         else:
             semantic_id = None
         
@@ -191,7 +182,7 @@ class TodoManager:
     
     def get_todos(self, status: Optional[str] = None, 
                   session_id: Optional[str] = None) -> List[TodoItem]:
-        """Get todos with optional filtering."""
+
         filtered = self._todos
         
         if status:
@@ -203,17 +194,14 @@ class TodoManager:
         return filtered
     
     def get_current_session_todos(self) -> List[TodoItem]:
-        """Get todos for the current session."""
+
         if not self.session_id:
-            # If no session ID, return all todos from shared file
             return self.get_todos()
         
-        # With session-specific storage, all loaded todos belong to this session
-        # but we'll still filter for extra safety
         return self.get_todos(session_id=self.session_id)
     
     def update_todo(self, todo_id: str, **kwargs) -> bool:
-        """Update a todo item."""
+
         for todo in self._todos:
             if todo.id == todo_id:
                 todo.update(**kwargs)
@@ -222,11 +210,9 @@ class TodoManager:
         return False
     
     def complete_todo(self, todo_id: str) -> bool:
-        """Mark a todo as completed."""
         return self.update_todo(todo_id, status="completed")
     
     def delete_todo(self, todo_id: str) -> bool:
-        """Delete a todo item."""
         for i, todo in enumerate(self._todos):
             if todo.id == todo_id:
                 del self._todos[i]
@@ -235,74 +221,49 @@ class TodoManager:
         return False
     
     def clear_completed(self):
-        """Remove all completed todos."""
         self._todos = [t for t in self._todos if t.status != "completed"]
         self._save_todos()
     
     def get_todo_by_id(self, todo_id: str) -> Optional[TodoItem]:
-        """Get a specific todo by ID."""
         for todo in self._todos:
             if todo.id == todo_id:
                 return todo
         return None
     
-    def smart_prioritize(self, content: str) -> str:
-        """Intelligently determine priority based on content."""
-        content_lower = content.lower()
-        
-        # High priority keywords
-        high_priority_keywords = [
-            "urgent", "critical", "important", "fix", "bug", "error", 
-            "broken", "failing", "security", "deploy", "release"
-        ]
-        
-        # Low priority keywords  
-        low_priority_keywords = [
-            "cleanup", "refactor", "documentation", "docs", "comment",
-            "optimize", "improve", "enhance", "consider", "maybe"
-        ]
-        
-        for keyword in high_priority_keywords:
-            if keyword in content_lower:
-                return "high"
-        
-        for keyword in low_priority_keywords:
-            if keyword in content_lower:
-                return "low"
-        
-        return "medium"
+    async def smart_prioritize(self, content: str) -> str:
+        """Smart priority detection using SemanticMatcher with fallback."""
+        if self.semantic_matcher:
+            try:
+                return await self.semantic_matcher.analyze_todo_priority(content)
+            except Exception:
+                # Fall back to semantic matcher's fallback method
+                return self.semantic_matcher._fallback_priority(content)
+        else:
+            # Create a temporary semantic matcher for fallback behavior only
+            from .semantic_matcher import SemanticMatcher
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            return temp_matcher._fallback_priority(content)
     
-    def generate_semantic_id(self, content: str) -> str:
-        """
-        Generate semantic ID from todo content 
-        Returns kebab-case ID like "implement-openai-provider", "fix-auth-bug".
-        """
+    async def generate_semantic_id(self, content: str) -> str:
+        """Generate semantic ID using SemanticMatcher with fallback."""
         import re
         
-        # Clean and normalize content
-        content_lower = content.lower().strip()
-        
-        # Extract key verbs and nouns
-        # Common action verbs for todos
-        action_verbs = [
-            'implement', 'create', 'add', 'build', 'develop', 'write',
-            'fix', 'debug', 'resolve', 'solve', 'repair',
-            'update', 'modify', 'change', 'edit', 'refactor',
-            'test', 'validate', 'verify', 'check',
-            'remove', 'delete', 'clean', 'cleanup',
-            'analyze', 'research', 'investigate', 'explore',
-            'design', 'plan', 'configure', 'setup'
-        ]
-        
-        # Find action verb in content
+        # Extract action using SemanticMatcher
         action = None
-        for verb in action_verbs:
-            if verb in content_lower:
-                action = verb
-                break
+        if self.semantic_matcher:
+            try:
+                action = await self.semantic_matcher.extract_primary_action(content)
+            except Exception:
+                action = self.semantic_matcher._fallback_extract_action(content)
+        else:
+            # Create temporary semantic matcher for fallback behavior only
+            from .semantic_matcher import SemanticMatcher
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            action = temp_matcher._fallback_extract_action(content)
         
-        # If no action verb found, try to infer from content
+        # Fallback if no action found
         if not action:
+            content_lower = content.lower()
             if any(word in content_lower for word in ['bug', 'error', 'issue', 'problem']):
                 action = 'fix'
             elif any(word in content_lower for word in ['new', 'add']):
@@ -312,100 +273,153 @@ class TodoManager:
             else:
                 action = 'task'
         
-        # Extract main subject/object
-        # Remove common stop words and action verbs
-        stop_words = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
-            'before', 'after', 'above', 'below', 'between', 'this', 'that', 'these',
-            'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves'
-        }
+        # Normalize content using SemanticMatcher
+        normalized_content = content
+        if self.semantic_matcher:
+            try:
+                normalized_content = await self.semantic_matcher.normalize_todo_content(content)
+            except Exception:
+                normalized_content = self.semantic_matcher._fallback_normalize_content(content)
+        else:
+            from .semantic_matcher import SemanticMatcher
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            normalized_content = temp_matcher._fallback_normalize_content(content)
         
-        # Clean content: remove punctuation, split into words
-        clean_content = re.sub(r'[^\w\s-]', ' ', content_lower)
+        # Extract meaningful words from normalized content
+        clean_content = re.sub(r'[^\w\s-]', ' ', normalized_content.lower())
         words = clean_content.split()
         
-        # Filter out stop words and action verbs
+        # Get stop words from semantic matcher
+        stop_words = set()
+        if self.semantic_matcher:
+            stop_words = self.semantic_matcher._fallback_keywords['stop_words']
+        else:
+            from .semantic_matcher import SemanticMatcher
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            stop_words = temp_matcher._fallback_keywords['stop_words']
+        
+        # Filter meaningful words
         meaningful_words = [
             word for word in words 
-            if word not in stop_words and word not in action_verbs and len(word) > 2
+            if word not in stop_words and len(word) > 2 and word != action
         ]
         
-        # Take up to 3 most meaningful words
         subject_words = meaningful_words[:3]
         
-        # Combine action + subject
+        # Build semantic ID
         if subject_words:
             semantic_id = f"{action}-{'-'.join(subject_words)}"
         else:
-            # Fallback: use first few words of content
             fallback_words = [w for w in words[:3] if len(w) > 2]
             if fallback_words:
                 semantic_id = '-'.join(fallback_words)
             else:
                 semantic_id = f"{action}-task"
         
-        # Ensure valid kebab-case
+        # Clean and format ID
         semantic_id = re.sub(r'[^a-z0-9-]', '-', semantic_id)
-        semantic_id = re.sub(r'-+', '-', semantic_id)  # Remove multiple dashes
-        semantic_id = semantic_id.strip('-')  # Remove leading/trailing dashes
+        semantic_id = re.sub(r'-+', '-', semantic_id)
+        semantic_id = semantic_id.strip('-')
         
-        # Ensure uniqueness within session
         return self._ensure_unique_id(semantic_id)
     
     def _ensure_unique_id(self, preferred_id: str) -> str:
-        """Ensure the ID is unique within the current session."""
         existing_ids = {todo.id for todo in self._todos}
         
         if preferred_id not in existing_ids:
             return preferred_id
         
-        # Try numbered variations
         for i in range(2, 100):
             candidate = f"{preferred_id}-{i}"
             if candidate not in existing_ids:
                 return candidate
         
-        # Fallback to UUID if we can't find a unique semantic ID
         import uuid
         return str(uuid.uuid4())
     
-    def generate_smart_todos(self, user_message: str) -> List[str]:
-        """Generate smart todo suggestions based on user message."""
+    async def generate_smart_todos(self, user_message: str) -> List[str]:
+        """Generate smart todo suggestions using SemanticMatcher with pattern fallback."""
         suggestions = []
+        
+        # First, try to use LLM for smart todo generation if available
+        if self.semantic_matcher and self.semantic_matcher.llm_provider:
+            try:
+                # Use LLM to extract actionable tasks from the message
+                prompt = f"""
+Extract actionable todo items from this user message:
+
+Message: "{user_message}"
+
+Look for:
+- Explicit todo statements (need to, should, must, have to)
+- Action items (implement, create, add, fix, update, etc.)
+- Issues mentioned that need addressing
+- Features or improvements suggested
+
+Return 1-3 clear, actionable todo items. Respond with ONLY a JSON object:
+{{
+  "todos": ["actionable todo 1", "actionable todo 2", "actionable todo 3"],
+  "reasoning": "brief explanation"
+}}
+
+If no clear todos are found, use "todos": []
+"""
+                messages = [{"role": "user", "content": prompt}]
+                response = await self.semantic_matcher.llm_provider.chat_with_messages(messages)
+                
+                if response.content:
+                    try:
+                        import json
+                        import re
+                        json_match = re.search(r'\{.*?\}', response.content, re.DOTALL)
+                        if json_match:
+                            data = json.loads(json_match.group(0))
+                            llm_todos = data.get('todos', [])
+                            if isinstance(llm_todos, list) and llm_todos:
+                                return llm_todos[:3]
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+            except Exception:
+                pass  # Fall back to pattern matching
+        
+        # Fallback: Use pattern matching with consolidated patterns
         message_lower = user_message.lower()
         
-        # Common patterns that suggest todos
+        # Use consolidated action verbs from semantic matcher
+        action_verbs = []
+        if self.semantic_matcher:
+            action_verbs = self.semantic_matcher._fallback_keywords['action_verbs']
+        else:
+            from .semantic_matcher import SemanticMatcher
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            action_verbs = temp_matcher._fallback_keywords['action_verbs']
+        
+        # Check for patterns including action verbs
         patterns = [
             ("need to", "Need to"),
             ("should", "Should"),
             ("must", "Must"),
             ("have to", "Have to"),
             ("todo", "TODO:"),
-            ("fixme", "FIXME:"),
-            ("implement", "Implement"),
-            ("create", "Create"),
-            ("add", "Add"),
-            ("fix", "Fix"),
-            ("update", "Update"),
-            ("remove", "Remove"),
-            ("delete", "Delete")
+            ("fixme", "FIXME:")
         ]
+        
+        # Add action verbs as patterns
+        for verb in action_verbs[:10]:  # Limit to avoid too many patterns
+            patterns.append((verb, verb.title()))
         
         for pattern, prefix in patterns:
             if pattern in message_lower:
-                # Extract potential todo items
                 sentences = user_message.split('.')
                 for sentence in sentences:
                     if pattern in sentence.lower():
-                        # Clean up the sentence
                         clean_sentence = sentence.strip()
                         if len(clean_sentence) > 10 and len(clean_sentence) < 100:
-                            if not clean_sentence.startswith(prefix):
+                            if not clean_sentence.lower().startswith(prefix.lower()):
                                 clean_sentence = f"{prefix} {clean_sentence.lower()}"
                             suggestions.append(clean_sentence)
         
-        return suggestions[:3]  # Limit to 3 suggestions
+        return suggestions[:3]
 
 
 def display_todos_table(todos: List[TodoItem], title: str = "Current Tasks", show_summary: bool = True):
@@ -413,7 +427,6 @@ def display_todos_table(todos: List[TodoItem], title: str = "Current Tasks", sho
         console.print("\n[dim]No tasks found[/dim]")
         return
     
-    # Sort by priority and status
     priority_order = {"high": 0, "medium": 1, "low": 2}
     status_order = {"in_progress": 0, "pending": 1, "completed": 2}
     
@@ -423,22 +436,16 @@ def display_todos_table(todos: List[TodoItem], title: str = "Current Tasks", sho
         t.created_at
     ))
     
-    # Simple header
     console.print(f"\n• {title}")
     
-    # Display each todo as simple bullet points
     for todo in sorted_todos:
         if todo.status == "completed":
-            # Completed tasks with strikethrough - using proper Rich markup
             console.print(f"  [bold green]●[/bold green] [green strike]{todo.content}[/green strike]")
         elif todo.status == "in_progress":
-            # In progress tasks
             console.print(f"  [bold yellow]◐[/bold yellow] {todo.content}")
         else:
-            # Pending tasks  
             console.print(f"  ◯ {todo.content}")
     
-    # Simple summary using the provided todos (caller should pass all relevant todos)
     if show_summary:
         completed = len([t for t in todos if t.status == "completed"])
         pending = len([t for t in todos if t.status == "pending"])

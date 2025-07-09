@@ -5,10 +5,8 @@ from .models import Message
 
 
 class MessageHistoryManager:
-    """Manages message history for CLI input navigation."""
     
     def __init__(self, session_manager: OptimizedSessionManager):
-        """Initialize with existing OptimizedSessionManager for project awareness."""
         self.session_manager = session_manager
         self._history_cache: Optional[List[str]] = None
         self._current_index = -1
@@ -66,7 +64,6 @@ class MessageHistoryManager:
         return user_messages
     
     def start_navigation(self, current_input: str = "") -> str:
-        """Start history navigation, return first historical message or current input."""
         self._original_input = current_input
         history = self._load_project_user_messages()
         
@@ -79,7 +76,6 @@ class MessageHistoryManager:
         return history[self._current_index]
     
     def navigate_up(self) -> Optional[str]:
-        """Navigate to previous (older) message in history."""
         history = self._load_project_user_messages()
         
         if not history:
@@ -126,21 +122,17 @@ class MessageHistoryManager:
         return self._original_input
     
     def reset_navigation(self) -> str:
-        """Reset navigation and return to original input."""
         original = self._original_input
         self._current_index = -1
         self._original_input = ""
         return original
     
     def invalidate_cache(self):
-        """Invalidate the history cache to force reload on next access."""
         self._history_cache = None
     
     def get_history_count(self) -> int:
-        """Get the number of messages in history."""
         history = self._load_project_user_messages()
         return len(history)
     
     def is_navigating(self) -> bool:
-        """Check if currently in navigation mode."""
         return self._current_index != -1

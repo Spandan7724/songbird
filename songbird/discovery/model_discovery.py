@@ -52,11 +52,9 @@ class BaseModelDiscovery(ABC):
     
     @abstractmethod
     async def _discover_models(self) -> List[DiscoveredModel]:
-        """Discover available models for this provider."""
         pass
     
     def _get_fallback_models(self) -> List[DiscoveredModel]:
-        """Get hardcoded fallback models if discovery fails."""
         fallbacks = {
             "openai": [
                 DiscoveredModel("gpt-4o", "GPT-4o", "openai", context_length=128000),
@@ -70,7 +68,6 @@ class BaseModelDiscovery(ABC):
                 DiscoveredModel("claude-3-opus-20240229", "Claude 3 Opus", "anthropic", context_length=200000),
             ],
             "gemini": [
-                # Confirmed working models based on LiteLLM compatibility test
                 DiscoveredModel("gemini-2.0-flash", "Gemini 2.0 Flash", "gemini", context_length=1000000),
                 DiscoveredModel("gemini-2.0-flash-001", "Gemini 2.0 Flash", "gemini", context_length=1000000),
                 DiscoveredModel("gemini-1.5-flash", "Gemini 1.5 Flash", "gemini", context_length=1000000),
@@ -126,22 +123,18 @@ class BaseModelDiscovery(ABC):
         return fallback_models
     
     def _is_cache_valid(self) -> bool:
-        """Check if the cache is still valid."""
         if not self._cache:
             return False
         return (time.time() - self._cache_timestamp) < self._cache_ttl
     
     def invalidate_cache(self):
-        """Invalidate the model cache."""
         self._cache = []
         self._cache_timestamp = 0
 
 
 class OpenAIModelDiscovery(BaseModelDiscovery):
-    """OpenAI model discovery using their API."""
     
     async def _discover_models(self) -> List[DiscoveredModel]:
-        """Discover OpenAI models via API."""
         import os
         
         # Check if API key is available
@@ -312,7 +305,6 @@ class OllamaModelDiscovery(BaseModelDiscovery):
             return False
     
     async def _discover_via_http(self) -> List[DiscoveredModel]:
-        """Discover Ollama models via HTTP API."""
         try:
             import httpx
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -342,10 +334,8 @@ class OllamaModelDiscovery(BaseModelDiscovery):
 
 
 class OpenRouterModelDiscovery(BaseModelDiscovery):
-    """OpenRouter model discovery using their API."""
     
     async def _discover_models(self) -> List[DiscoveredModel]:
-        """Discover OpenRouter models via API."""
         import os
         
         # Check if API key is available
@@ -426,18 +416,14 @@ class OpenRouterModelDiscovery(BaseModelDiscovery):
 
 
 class ClaudeModelDiscovery(BaseModelDiscovery):
-    """Claude model discovery (uses fallback since no public API)."""
     
     async def _discover_models(self) -> List[DiscoveredModel]:
-        """Claude doesn't have a public model listing API, use curated list."""
         return self._get_fallback_models()
 
 
 class CopilotModelDiscovery(BaseModelDiscovery):
-    """GitHub Copilot model discovery."""
     
     async def _discover_models(self) -> List[DiscoveredModel]:
-        """Discover GitHub Copilot models via API."""
         import os
         
         api_key = os.getenv("COPILOT_ACCESS_TOKEN")
@@ -495,14 +481,12 @@ class CopilotModelDiscovery(BaseModelDiscovery):
         return self._get_fallback_models()
     
     def _supports_function_calling(self, model_info: dict) -> bool:
-        """Check if the model supports function calling."""
         # GitHub Copilot typically supports function calling for GPT-4 and Claude models
         model_id = model_info.get("id", "").lower()
         return any(keyword in model_id for keyword in ["gpt-4", "claude", "sonnet"])
 
 
 class ModelDiscoveryService:
-    """Central service for discovering models across all providers."""
     
     def __init__(self):
         self._discoverers = {
@@ -515,7 +499,6 @@ class ModelDiscoveryService:
         }
     
     async def discover_models(self, provider: str, use_cache: bool = True) -> List[DiscoveredModel]:
-        """Discover models for a specific provider."""
         discoverer = self._discoverers.get(provider)
         if not discoverer:
             logger.warning(f"No discoverer available for provider: {provider}")
@@ -524,7 +507,6 @@ class ModelDiscoveryService:
         return await discoverer.discover_models(use_cache=use_cache)
     
     async def discover_all_models(self, use_cache: bool = True) -> Dict[str, List[DiscoveredModel]]:
-        """Discover models for all providers."""
         results = {}
         
         # Run discovery for all providers concurrently
@@ -543,7 +525,6 @@ class ModelDiscoveryService:
         return results
     
     def invalidate_cache(self, provider: Optional[str] = None):
-        """Invalidate cache for specific provider or all providers."""
         if provider:
             discoverer = self._discoverers.get(provider)
             if discoverer:
@@ -558,7 +539,6 @@ _discovery_service: Optional[ModelDiscoveryService] = None
 
 
 def get_discovery_service() -> ModelDiscoveryService:
-    """Get the global model discovery service instance."""
     global _discovery_service
     if _discovery_service is None:
         _discovery_service = ModelDiscoveryService()

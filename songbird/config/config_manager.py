@@ -1,4 +1,3 @@
-# songbird/config/config_manager.py
 """Configuration management system for Songbird."""
 
 import json
@@ -10,7 +9,6 @@ from dataclasses import dataclass, asdict, field
 
 @dataclass
 class LLMConfig:
-    """Configuration for LLM providers."""
     default_provider: str = "gemini"
     default_models: Dict[str, str] = field(default_factory=lambda: {
         "openai": "gpt-4o",
@@ -161,17 +159,14 @@ class ConfigManager:
                     self._set_nested_override(section, key, env_value)
     
     def _str_to_bool(self, value: str) -> bool:
-        """Convert string to boolean."""
         return value.lower() in ('true', '1', 'yes', 'on', 'y')
     
     def _set_nested_override(self, section: str, key: str, value: Any):
-        """Set a nested override value."""
         if section not in self._env_overrides:
             self._env_overrides[section] = {}
         self._env_overrides[section][key] = value
     
     def load_config(self) -> SongbirdConfig:
-        """Load configuration from file and apply environment overrides."""
         if self._config is not None:
             return self._config
         
@@ -196,7 +191,6 @@ class ConfigManager:
         return config
     
     def _apply_env_overrides(self, config: SongbirdConfig):
-        """Apply environment variable overrides to config."""
         for section, overrides in self._env_overrides.items():
             if hasattr(config, section):
                 section_config = getattr(config, section)
@@ -219,7 +213,6 @@ class ConfigManager:
             print(f"Warning: Error saving config file: {e}")
     
     def get_config(self) -> SongbirdConfig:
-        """Get the current configuration."""
         if self._config is None:
             return self.load_config()
         return self._config
@@ -238,12 +231,10 @@ class ConfigManager:
         self.save_config(config)
     
     def reset_config(self):
-        """Reset configuration to defaults."""
         self._config = SongbirdConfig()
         self.save_config()
     
     def get_api_keys(self) -> Dict[str, Optional[str]]:
-        """Get API keys from environment variables."""
         return {
             "openai": os.getenv("OPENAI_API_KEY"),
             "claude": os.getenv("ANTHROPIC_API_KEY"),
@@ -253,7 +244,6 @@ class ConfigManager:
         }
     
     def get_available_providers(self) -> Dict[str, bool]:
-        """Check which providers are available based on API keys."""
         api_keys = self.get_api_keys()
         return {
             "openai": bool(api_keys["openai"]),
@@ -282,15 +272,12 @@ class ConfigManager:
         return "ollama"
 
 
-# Global config manager instance
 _config_manager = ConfigManager()
 
 
 def get_config() -> SongbirdConfig:
-    """Get the global configuration."""
     return _config_manager.get_config()
 
 
 def get_config_manager() -> ConfigManager:
-    """Get the global configuration manager."""
     return _config_manager

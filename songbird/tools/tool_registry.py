@@ -1,5 +1,4 @@
-# songbird/tools/tool_registry.py
-"""Centralized tool registry for dynamic tool management and provider-agnostic schemas."""
+# Centralized tool registry for dynamic tool management and provider-agnostic schemas.
 
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
@@ -17,7 +16,6 @@ from .tree_tool import tree_display
 
 
 class ToolCategory(Enum):
-    """Categories for organizing tools."""
     FILE_OPERATIONS = "file_operations"
     SEARCH = "search"
     SHELL = "shell"
@@ -27,7 +25,6 @@ class ToolCategory(Enum):
 
 @dataclass
 class ToolDefinition:
-    """Complete definition of a tool including metadata and function."""
     name: str
     function: Callable
     schema: Dict[str, Any]
@@ -41,27 +38,23 @@ class ToolDefinition:
     version: str = "1.0"
     
     def to_llm_schema(self, provider_format: str = "openai") -> Dict[str, Any]:
-        """Convert to LLM provider-specific schema format."""
         if provider_format in ["openai", "anthropic", "openrouter"]:
             return {
                 "type": "function",
                 "function": self.schema
             }
         elif provider_format == "gemini":
-            # Gemini uses a slightly different format
             return {
                 "name": self.schema["name"],
                 "description": self.schema["description"],
                 "parameters": self.schema["parameters"]
             }
         elif provider_format == "ollama":
-            # Ollama follows OpenAI format mostly
             return {
                 "type": "function",
                 "function": self.schema
             }
         else:
-            # Default to OpenAI format
             return {
                 "type": "function", 
                 "function": self.schema
@@ -69,16 +62,13 @@ class ToolDefinition:
 
 
 class ToolRegistry:
-    """Centralized registry for all available tools."""
     
     def __init__(self):
         self._tools: Dict[str, ToolDefinition] = {}
         self._initialize_default_tools()
     
     def _initialize_default_tools(self):
-        """Initialize the registry with all available tools."""
         
-        # File Operations
         self.register_tool(ToolDefinition(
             name="file_read",
             function=file_read,
@@ -604,57 +594,47 @@ class ToolRegistry:
         ))
     
     def register_tool(self, tool_def: ToolDefinition):
-        """Register a new tool in the registry."""
         self._tools[tool_def.name] = tool_def
     
     def unregister_tool(self, tool_name: str):
-        """Remove a tool from the registry."""
         if tool_name in self._tools:
             del self._tools[tool_name]
     
     def get_tool(self, tool_name: str) -> Optional[ToolDefinition]:
-        """Get a tool definition by name."""
         return self._tools.get(tool_name)
     
     def get_tool_function(self, tool_name: str) -> Optional[Callable]:
-        """Get the function for a tool."""
         tool_def = self.get_tool(tool_name)
         return tool_def.function if tool_def else None
     
     def get_all_tools(self) -> Dict[str, ToolDefinition]:
-        """Get all registered tools."""
         return self._tools.copy()
     
     def get_tools_by_category(self, category: ToolCategory) -> Dict[str, ToolDefinition]:
-        """Get tools filtered by category."""
         return {
             name: tool_def for name, tool_def in self._tools.items()
             if tool_def.category == category
         }
     
     def get_llm_schemas(self, provider_format: str = "openai") -> List[Dict[str, Any]]:
-        """Get tool schemas formatted for LLM providers."""
         return [
             tool_def.to_llm_schema(provider_format)
             for tool_def in self._tools.values()
         ]
     
     def get_parallel_safe_tools(self) -> List[str]:
-        """Get list of tools that can be executed in parallel."""
         return [
             name for name, tool_def in self._tools.items()
             if tool_def.parallel_safe
         ]
     
     def get_destructive_tools(self) -> List[str]:
-        """Get list of destructive tools that require confirmation."""
         return [
             name for name, tool_def in self._tools.items()
             if tool_def.is_destructive
         ]
     
     def validate_tool_arguments(self, tool_name: str, arguments: Dict[str, Any]) -> bool:
-        """Validate arguments against tool schema."""
         tool_def = self.get_tool(tool_name)
         if not tool_def:
             return False
@@ -664,7 +644,6 @@ class ToolRegistry:
         return all(arg in arguments for arg in required)
     
     def get_tool_info(self) -> Dict[str, Any]:
-        """Get comprehensive information about all tools."""
         return {
             "total_tools": len(self._tools),
             "categories": {
@@ -692,22 +671,18 @@ _tool_registry = ToolRegistry()
 
 
 def get_tool_registry() -> ToolRegistry:
-    """Get the global tool registry instance."""
     return _tool_registry
 
 
 def get_tool_function(tool_name: str) -> Optional[Callable]:
-    """Get a tool function by name."""
     return _tool_registry.get_tool_function(tool_name)
 
 
 def get_tool_schemas(provider_format: str = "openai") -> List[Dict[str, Any]]:
-    """Get tool schemas for LLM providers."""
     return _tool_registry.get_llm_schemas(provider_format)
 
 
 def get_filtered_tool_schemas(provider_format: str = "openai", exclude_categories: List[ToolCategory] = None) -> List[Dict[str, Any]]:
-    """Get tool schemas for LLM providers with category filtering."""
     exclude_categories = exclude_categories or []
     
     filtered_tools = {
@@ -722,14 +697,7 @@ def get_filtered_tool_schemas(provider_format: str = "openai", exclude_categorie
 
 
 def get_llm_tool_schemas(provider_format: str = "openai") -> List[Dict[str, Any]]:
-    """Get tool schemas for LLM providers with hybrid todo access.
-    
-    Allows LLM to read todos (todo_read) for context awareness,
-    but blocks todo creation (todo_write) to maintain single source of truth.
-    Auto-creation and real-time completion remain the only write sources.
-    """
-    # Get all tools except the blocked ones
-    blocked_tools = {'todo_write'}  # Block only todo_write, allow todo_read
+    blocked_tools = {'todo_write'}
     
     filtered_tools = {
         name: tool_def for name, tool_def in _tool_registry._tools.items()

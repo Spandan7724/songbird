@@ -1,5 +1,4 @@
-# songbird/agent/agent_core.py
-"""Agent Core - handles planning, decision logic, and conversation flow."""
+# Agent Core - handles planning, decision logic, and conversation flow.
 
 import json
 import logging
@@ -17,20 +16,17 @@ from .planning import AgentPlan, PlanStatus
 from .plan_manager import PlanManager
 from ..config.config_manager import get_config
 from .message_classifier import MessageClassifier
+from .context_manager import FileContextManager
 
-# Configure logger for agent core
 logger = logging.getLogger(__name__)
 
 
 class ToolRunnerProtocol(Protocol):
-    """Protocol for tool execution."""
     
     async def execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a tool with given arguments."""
         ...
     
     def get_available_tools(self) -> List[Dict[str, Any]]:
-        """Get list of available tools."""
         ...
 
 
@@ -54,6 +50,7 @@ class AgentCore:
         self.current_plan: Optional[AgentPlan] = None
         self.plan_manager = PlanManager()
         self.message_classifier = MessageClassifier(self.provider)
+        self.file_context_manager = FileContextManager()
         
         # Load system prompt from centralized prompts
         from ..prompts import get_core_system_prompt
@@ -62,31 +59,57 @@ class AgentCore:
     async def handle_message(self, user_message: str) -> AgentOutput:
         """Handle a user message and return appropriate output."""
         try:
-            # Check configuration to see if we should run auto-todo features
+            # Process file references first to enhance the message with file context
+            enhanced_message, file_contexts = await self.file_context_manager.process_message_with_file_context(user_message)
+            
+            # Show file context summary if files were included (and not in quiet mode)
+            if file_contexts and not self.quiet_mode:
+                from rich.console import Console
+                console = Console()
+                summary = self.file_context_manager.get_file_summary(file_contexts)
+                console.print(f"[dim]{summary}[/dim]")
+            
+            # Track referenced files in session
+            if file_contexts and self.session:
+                for ctx in file_contexts:
+                    if not ctx.error:  # Only track successfully loaded files
+                        self.session.add_referenced_file(
+                            ctx.file_path, 
+                            {
+                                "relative_path": ctx.relative_path,
+                                "line_count": ctx.line_count,
+                                "size_bytes": ctx.size_bytes
+                            }
+                        )
+            
+            # Use enhanced message for processing
+            processed_message = enhanced_message
+            
+
             from ..tools.semantic_config import get_semantic_config
             config = get_semantic_config()
             
-            # Auto-create todos if enabled and we have a session
+
             # NOTE: Auto-completion now happens AFTER tool execution (better timing)
             if self.session:
-                # Auto-create todos for complex requests 
+
                 if config.enable_auto_todo_creation:
                     await self._auto_create_todos_if_needed(user_message)
             
-            # Add user message to history
+            # Add enhanced message to history (this is what the LLM will see)
             self.conversation_history.append({
                 "role": "user",
-                "content": user_message
+                "content": processed_message
             })
             
-            # Add to session if available
+            # Add to session if available (store original user message for session history)
             if self.session:
                 user_msg = Message(role="user", content=user_message)
                 self.session.add_message(user_msg)
                 if self.session_manager:
                     self.session_manager.save_session(self.session)
             
-            # Generate plan if needed (for complex tasks)
+            # Generate plan if needed (for complex tasks - use original message)
             await self._generate_plan_if_needed(user_message)
             
             # Process the message through the agentic loop
@@ -110,22 +133,18 @@ class AgentCore:
                 response = await self.provider.chat_with_messages(messages)
                 
                 if response.content:
-                    # Parse and store the plan
+
                     plan = await self.plan_manager.parse_plan_from_response(response.content)
                     if plan:
                         self.plan_manager.set_current_plan(plan)
                         self.current_plan = plan
-                        
-                        # Display the plan to the user
+
                         await self._display_plan(plan)
                         
         except Exception:
-            # If planning fails, continue without a plan
             pass
     
     async def _display_plan(self, plan) -> None:
-        """Display the execution plan to the user."""
-        # Skip plan display if quiet mode is enabled
         if self.quiet_mode:
             return
             
@@ -139,12 +158,11 @@ class AgentCore:
             plan_display.append(f"{plan.goal}\n\n", style="white")
             
             for i, step in enumerate(plan.steps, 1):
-                # Handle both dict and PlanStep object formats
-                if hasattr(step, 'action'):  # PlanStep object
+                if hasattr(step, 'action'):
                     action = step.action
                     args = step.args
                     description = step.description
-                else:  # Dict format
+                else:
                     action = step.get('action', 'unknown')
                     args = step.get('args', {})
                     description = step.get('description', '')
@@ -152,7 +170,6 @@ class AgentCore:
 
                 plan_display.append(" • ", style="spring_green1")
                 
-                # Format step description based on action
                 if action == 'file_create':
                     file_path = args.get('file_path', 'unknown')
                     plan_display.append("Create file ", style="white")
@@ -174,7 +191,6 @@ class AgentCore:
                     plan_display.append("List directory contents of ", style="white")
                     plan_display.append(f"{path}", style="cyan")
                 else:
-                    # Generic action display
                     formatted_action = action.replace('_', ' ').title()
                     plan_display.append(f"{formatted_action}", style="white")
                     if description:
@@ -189,28 +205,22 @@ class AgentCore:
             console.print("")
             
         except Exception:
-            # Don't fail if plan display has issues
             pass
     
     async def _agentic_loop(self) -> AgentOutput:
-        """Main agentic loop for autonomous task execution with adaptive termination."""
-        # Get configuration for termination criteria
         config = get_config()
-        max_iterations = config.agent.max_iterations  # Configurable emergency brake
+        max_iterations = config.agent.max_iterations
         iteration_count = 0
         consecutive_no_tools = 0
         total_tokens_used = 0
         max_tokens_budget = config.agent.token_budget  # Configurable token budget
         
-        # Track repeated failed tool calls to detect infinite loops
         recent_failed_calls = []
         max_repeated_failures = 3
         
-        # Logging for long-task diagnosis
         loop_start_time = datetime.now()
         logger.info(f"Starting agentic loop with max_iterations={max_iterations}, token_budget={max_tokens_budget}")
         
-        # Enable verbose logging if configured
         verbose_logging = config.ui.verbose_logging
         
         while iteration_count < max_iterations:
@@ -220,34 +230,26 @@ class AgentCore:
             if verbose_logging:
                 logger.debug(f"Iteration {iteration_count}: Starting with {consecutive_no_tools} consecutive no-tool turns")
             
-            # Get available tools
             tools = self.tool_runner.get_available_tools()
             
-            # Build messages for LLM
             messages = self._build_messages_for_llm()
             
-            # Get LLM response
             if verbose_logging:
                 logger.debug(f"Iteration {iteration_count}: Requesting LLM response with {len(tools)} tools available")
             
             response = await self.provider.chat_with_messages(messages, tools=tools)
             
-            # Track token usage (approximate)
             if response.content:
                 total_tokens_used += len(response.content.split()) * 1.3  # Rough approximation
             
-            # Handle the response
             if response.tool_calls:
-                # Reset consecutive no-tool counter
                 consecutive_no_tools = 0
                 
                 if verbose_logging:
                     logger.debug(f"Iteration {iteration_count}: Executing {len(response.tool_calls)} tool calls")
                 
-                # Execute tools and continue loop
                 tool_results = await self._execute_tools(response.tool_calls)
                 
-                # Check for repeated failed tool calls (infinite loop detection)
                 if self._detect_repeated_failures(tool_results, recent_failed_calls, max_repeated_failures):
                     logger.warning(f"Iteration {iteration_count}: Detected repeated failures - terminating loop")
                     await self._add_assistant_message_to_history(response, tool_results)
@@ -256,7 +258,6 @@ class AgentCore:
                     )
                     return AgentOutput.completion(assistant_message)
                 
-                # Check if recent successful operations suggest task completion
                 if self._detect_likely_completion(tool_results, iteration_count):
                     logger.info(f"Iteration {iteration_count}: Detected likely task completion - terminating loop")
                     await self._add_assistant_message_to_history(response, tool_results)
@@ -500,15 +501,13 @@ Remember to follow the plan systematically. Complete the current step before mov
     
     def _detect_likely_completion(self, tool_results: List[Dict[str, Any]], iteration_count: int) -> bool:
         """Detect if task is likely complete based on successful operations."""
-        if iteration_count < 5:  # Don't terminate too early - increased from 3
+        if iteration_count < 5: 
             return False
         
-        # Get configuration to make completion detection configurable
         config = get_config()
         if not config.agent.adaptive_termination:
-            return False  # Let user control termination if adaptive is disabled
+            return False
         
-        # Check if we just had successful file operations that likely fulfill the request
         successful_file_ops = 0
         successful_shell_ops = 0
         failed_ops = 0
@@ -525,22 +524,18 @@ Remember to follow the plan systematically. Complete the current step before mov
             else:
                 failed_ops += 1
         
-        # Don't terminate if there are recent failures - the task may need more work
         if failed_ops > 0:
             return False
         
-        # More conservative completion detection to prevent premature termination
         # Only terminate if we have many iterations with successful operations,
         # indicating the task is truly complete
         
         # For file operations, require more iterations to avoid cutting off multi-file tasks
         if successful_file_ops > 0 and iteration_count >= 12:
-            # Additional check: only terminate if no plan is active or plan is complete
             if self.current_plan and not self.plan_manager.is_plan_complete():
                 return False
             return True
         
-        # For shell operations, be even more conservative since they're often part of larger workflows
         if successful_shell_ops > 0 and iteration_count >= 15:
             # Additional check: only terminate if no plan is active or plan is complete
             if self.current_plan and not self.plan_manager.is_plan_complete():
@@ -550,8 +545,6 @@ Remember to follow the plan systematically. Complete the current step before mov
         return False
     
     async def _add_assistant_message_to_history(self, response: Any, tool_results: List[Dict[str, Any]]) -> None:
-        """Add assistant message with tool calls to conversation history."""
-        # Convert tool calls to serializable format
         serializable_tool_calls = []
         if response.tool_calls:
             for tool_call in response.tool_calls:
@@ -578,7 +571,6 @@ Remember to follow the plan systematically. Complete the current step before mov
             "tool_calls": serializable_tool_calls
         })
         
-        # Add tool results
         for tool_result in tool_results:
             # Sanitize tool result before JSON serialization
             sanitized_result = self._sanitize_for_json(tool_result["result"])
@@ -636,20 +628,17 @@ Remember to follow the plan systematically. Complete the current step before mov
                 await self.session_manager.flush_session(self.session)
     
     def get_conversation_history(self) -> List[Dict[str, Any]]:
-        """Get the current conversation history."""
         return self.conversation_history.copy()
     
     def set_current_plan(self, plan: AgentPlan) -> None:
-        """Set the current execution plan."""
         self.current_plan = plan
     
     def get_current_plan(self) -> Optional[AgentPlan]:
-        """Get the current execution plan."""
         return self.current_plan
     
     async def _should_terminate_loop(self, iteration_count: int, consecutive_no_tools: int, 
                                    total_tokens_used: int, max_tokens_budget: int) -> bool:
-        """Check if the agentic loop should terminate based on adaptive criteria."""
+        # Check if the agentic loop should terminate based on adaptive criteria.
         
         # 1. Token budget exceeded
         if total_tokens_used > max_tokens_budget:
@@ -733,10 +722,6 @@ Remember to follow the plan systematically. Complete the current step before mov
             pass
     
     def _check_recent_auto_creation(self) -> bool:
-        """
-        Check if we recently auto-created todos in this conversation.
-        Returns True if we should skip auto-creation due to recent activity.
-        """
         if not self.conversation_history:
             return False
         
@@ -753,10 +738,7 @@ Remember to follow the plan systematically. Complete the current step before mov
         return False
     
     async def _generate_todos_for_request(self, user_message: str, existing_todos: List = None) -> List[Dict[str, Any]]:
-        """
-        Use LLM to generate appropriate todos for a complex request.
-        Returns list of todo dictionaries with semantic IDs.
-        """
+
         existing_todos = existing_todos or []
         
         # Build existing todos context
@@ -772,7 +754,7 @@ EXISTING TODOS IN THIS SESSION:
 
 IMPORTANT: Do NOT create todos that are similar to or duplicate the existing ones above. Focus on different aspects or complementary tasks."""
         
-        # Create a focused prompt for todo generation with proper granularity
+
         prompt = f"""
 Analyze this request and generate appropriate todos: "{user_message}"{existing_context}
 

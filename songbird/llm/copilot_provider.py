@@ -1,9 +1,5 @@
 """
 Custom GitHub Copilot provider for Songbird.
-
-This module implements direct integration with GitHub Copilot's API since LiteLLM
-doesn't officially support GitHub Copilot yet. It handles the specific authentication
-and header requirements needed for the Copilot API.
 """
 
 import os
@@ -11,23 +7,13 @@ import json
 import logging
 from typing import Dict, Any, List, Optional, AsyncGenerator
 import httpx
-# Removed legacy UnifiedProviderInterface import
 from .types import ChatResponse
 
 logger = logging.getLogger(__name__)
 
 
 class CopilotProvider:
-    """Direct GitHub Copilot API provider implementation."""
-    
     def __init__(self, model: str = "gpt-4o", **kwargs):
-        """
-        Initialize the GitHub Copilot provider.
-        
-        Args:
-            model: The model name (e.g., "gpt-4o", "claude-3.5-sonnet")
-            **kwargs: Additional parameters
-        """
         self.model = model
         self.api_base = "https://api.githubcopilot.com"
         self.kwargs = kwargs
@@ -50,24 +36,18 @@ class CopilotProvider:
         logger.debug(f"Initialized GitHub Copilot provider with model: {model}")
     
     def get_provider_name(self) -> str:
-        """Get the provider name."""
         return "copilot"
     
     def get_model_name(self) -> str:
-        """Get the current model name."""
         return self.model
     
     def format_tools_for_provider(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Format tools for GitHub Copilot (uses OpenAI format)."""
         return tools  # GitHub Copilot uses OpenAI-compatible format
     
     def parse_response_to_unified(self, response: Any) -> ChatResponse:
-        """Parse provider response to unified ChatResponse format."""
-        # This method is not used in our implementation since we return ChatResponse directly
         return response
     
     def get_supported_features(self) -> Dict[str, bool]:
-        """Get supported features for GitHub Copilot provider."""
         return {
             "function_calling": True,
             "streaming": True,
@@ -80,13 +60,6 @@ class CopilotProvider:
                    tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """
         Send a chat completion request to GitHub Copilot API.
-        
-        Args:
-            messages: List of message dictionaries
-            tools: Optional list of tool schemas (OpenAI format)
-            
-        Returns:
-            ChatResponse object with the response
         """
         try:
             # Prepare the request payload
@@ -172,29 +145,13 @@ class CopilotProvider:
     
     async def chat_with_messages(self, messages: List[Dict[str, Any]], 
                                 tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
-        """
-        Alias for chat method to maintain compatibility with the conversation orchestrator.
-        
-        Args:
-            messages: List of message dictionaries
-            tools: Optional list of tool schemas (OpenAI format)
-            
-        Returns:
-            ChatResponse object with the response
-        """
+
         return await self.chat(messages, tools)
     
     async def stream_chat(self, messages: List[Dict[str, Any]], 
                          tools: Optional[List[Dict[str, Any]]] = None) -> AsyncGenerator[dict, None]:
         """
         Stream a chat completion request to GitHub Copilot API.
-        
-        Args:
-            messages: List of message dictionaries
-            tools: Optional list of tool schemas
-            
-        Yields:
-            dict: Streaming response chunks
         """
         try:
             # Prepare the request payload
@@ -263,11 +220,7 @@ class CopilotProvider:
     def get_available_models(self) -> List[str]:
         """
         Get available models from GitHub Copilot.
-        
-        Returns:
-            List of available model names
         """
-        # Return the full list of models that GitHub Copilot typically supports
         # This is used as a fallback when API discovery fails
         return [
             "gpt-4o",
@@ -288,9 +241,6 @@ class CopilotProvider:
     async def get_models(self) -> List[Dict[str, Any]]:
         """
         Get detailed model information from GitHub Copilot API.
-        
-        Returns:
-            List of model information dictionaries
         """
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:

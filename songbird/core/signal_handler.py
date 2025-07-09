@@ -1,4 +1,3 @@
-# songbird/core/signal_handler.py
 """Signal handling for graceful shutdown of Songbird."""
 
 import signal
@@ -74,7 +73,6 @@ class GracefulShutdownHandler:
         sys.exit(0)
     
     async def _async_shutdown(self):
-        """Perform asynchronous shutdown tasks."""
         try:
             # Execute async shutdown callbacks
             for name, callback in self.shutdown_callbacks.items():
@@ -116,33 +114,27 @@ class GracefulShutdownHandler:
             self.console.print(f"[red]Error during sync shutdown: {e}[/red]")
     
     def register_shutdown_callback(self, name: str, callback: Callable):
-        """Register a callback to be called during shutdown."""
         self.shutdown_callbacks[name] = callback
     
     def unregister_shutdown_callback(self, name: str):
-        """Unregister a shutdown callback."""
         if name in self.shutdown_callbacks:
             del self.shutdown_callbacks[name]
     
     def enable_async_mode(self):
-        """Enable async mode for shutdown handling."""
         self.async_context = True
     
     def restore_original_handlers(self):
-        """Restore original signal handlers."""
         for signum, handler in self.original_handlers.items():
             signal.signal(signum, handler)
     
     def force_shutdown(self):
-        """Force immediate shutdown without callbacks."""
         self.console.print("[red]Force shutdown initiated[/red]")
         self.restore_original_handlers()
         sys.exit(1)
 
 
 class SessionAwareShutdownHandler(GracefulShutdownHandler):
-    """Shutdown handler that's aware of session management."""
-    
+
     def __init__(self, session_manager=None, console: Optional[Console] = None):
         super().__init__(console)
         self.session_manager = session_manager
@@ -152,7 +144,6 @@ class SessionAwareShutdownHandler(GracefulShutdownHandler):
             self.register_session_manager(session_manager)
     
     def register_session_manager(self, session_manager):
-        """Register a session manager for shutdown handling."""
         self.session_manager = session_manager
         
         # Register appropriate shutdown callback
@@ -164,12 +155,10 @@ class SessionAwareShutdownHandler(GracefulShutdownHandler):
             self.register_shutdown_callback("session_manager", session_manager._flush_all_sessions_sync)
     
     def register_conversation(self, conversation):
-        """Register a conversation for shutdown handling."""
         if hasattr(conversation, 'cleanup'):
             self.register_shutdown_callback("conversation", conversation.cleanup)
     
     def register_ui_layer(self, ui_layer):
-        """Register a UI layer for shutdown handling."""
         if hasattr(ui_layer, 'cleanup'):
             self.register_shutdown_callback("ui_layer", ui_layer.cleanup)
 
@@ -179,7 +168,6 @@ _global_shutdown_handler: Optional[GracefulShutdownHandler] = None
 
 
 def get_shutdown_handler() -> GracefulShutdownHandler:
-    """Get or create the global shutdown handler."""
     global _global_shutdown_handler
     if _global_shutdown_handler is None:
         _global_shutdown_handler = GracefulShutdownHandler()
@@ -191,7 +179,6 @@ def setup_graceful_shutdown(
     console: Optional[Console] = None,
     enable_async: bool = True
 ) -> SessionAwareShutdownHandler:
-    """Setup graceful shutdown with session awareness."""
     handler = SessionAwareShutdownHandler(session_manager, console)
     
     if enable_async:
@@ -205,13 +192,11 @@ def setup_graceful_shutdown(
 
 
 def register_shutdown_callback(name: str, callback: Callable):
-    """Register a shutdown callback with the global handler."""
     handler = get_shutdown_handler()
     handler.register_shutdown_callback(name, callback)
 
 
 def cleanup_shutdown_handler():
-    """Clean up the global shutdown handler."""
     global _global_shutdown_handler
     if _global_shutdown_handler:
         _global_shutdown_handler.restore_original_handlers()

@@ -1,4 +1,3 @@
-# songbird/llm/aiohttp_session_manager.py
 """Comprehensive aiohttp session manager to prevent unclosed session warnings."""
 
 import asyncio
@@ -27,27 +26,18 @@ class AIOHTTPSessionManager:
     _all_sessions: Set[weakref.ref] = set()
     
     def __new__(cls) -> 'AIOHTTPSessionManager':
-        """Ensure singleton pattern."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
     
     def __init__(self):
-        """Initialize the session manager."""
         if not hasattr(self, '_initialized'):
             self._initialized = True
-            # Register cleanup handler only once
             if not AIOHTTPSessionManager._cleanup_registered:
                 atexit.register(self._cleanup_on_exit)
                 AIOHTTPSessionManager._cleanup_registered = True
     
     async def get_session(self) -> aiohttp.ClientSession:
-        """
-        Get or create the singleton aiohttp session.
-        
-        Returns:
-            aiohttp.ClientSession: Configured HTTP session
-        """
         async with AIOHTTPSessionManager._lock:
             if AIOHTTPSessionManager._session is None or AIOHTTPSessionManager._session.closed:
                 logger.debug("Creating new aiohttp session")
@@ -85,7 +75,6 @@ class AIOHTTPSessionManager:
             return AIOHTTPSessionManager._session
     
     def _session_cleanup_callback(self, ref):
-        """Callback when a session is garbage collected."""
         AIOHTTPSessionManager._all_sessions.discard(ref)
     
     async def close_session(self) -> None:
@@ -103,7 +92,6 @@ class AIOHTTPSessionManager:
                 await session.close()
                 
                 # Wait for underlying SSL connections to close
-                # This is the official aiohttp recommendation
                 await asyncio.sleep(0.250)
                 
                 logger.debug("Managed aiohttp session closed successfully")
@@ -197,9 +185,6 @@ class AIOHTTPSessionManager:
                    not AIOHTTPSessionManager._session.closed)
     
     async def reset_session(self) -> None:
-        """
-        Force reset the session (close current and create new on next get).
-        """
         await self.close_session()
         logger.debug("aiohttp session reset completed")
     
@@ -275,37 +260,19 @@ aiohttp_session_manager = AIOHTTPSessionManager()
 
 
 async def get_managed_aiohttp_session() -> aiohttp.ClientSession:
-    """
-    Convenience function to get the managed aiohttp session.
-    
-    Returns:
-        aiohttp.ClientSession: The singleton managed session
-    """
     return await aiohttp_session_manager.get_session()
 
 
 async def close_managed_aiohttp_session() -> None:
-    """
-    Convenience function to close all managed aiohttp sessions.
-    This performs comprehensive cleanup of all aiohttp sessions.
-    """
     await aiohttp_session_manager.close_all_sessions()
 
 
 def configure_google_genai_aiohttp() -> None:
-    """
-    Configure Google GenAI SDK to use managed aiohttp sessions.
-    Call this early in application startup.
-    """
     aiohttp_session_manager.configure_google_genai_session_sync()
 
 
 # Monkey patch detection and warning
 def detect_aiohttp_session_creation():
-    """
-    Debug utility to detect when new aiohttp sessions are created.
-    This can help identify sources of session leaks.
-    """
     original_init = aiohttp.ClientSession.__init__
     
     def patched_init(self, *args, **kwargs):
@@ -316,7 +283,6 @@ def detect_aiohttp_session_creation():
 
 
 def get_caller_info() -> str:
-    """Get information about who called the function."""
     import inspect
     try:
         frame = inspect.currentframe()

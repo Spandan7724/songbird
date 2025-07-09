@@ -1,5 +1,4 @@
 import sys
-from typing import Optional
 from rich.console import Console
 from InquirerPy import inquirer
 

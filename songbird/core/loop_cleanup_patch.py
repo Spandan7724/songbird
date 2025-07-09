@@ -1,9 +1,3 @@
-# songbird/core/loop_cleanup_patch.py
-"""
-Patch asyncio to prevent BaseEventLoop.__del__ errors during shutdown.
-This is a more aggressive approach that patches the event loop cleanup.
-"""
-
 import asyncio
 import atexit
 import logging
@@ -11,49 +5,35 @@ import warnings
 
 logger = logging.getLogger(__name__)
 
-# Store original methods
 _original_del = None
 _original_close = None
 _cleanup_applied = False
 
 
 def safe_event_loop_del(self):
-    """
-    Safe replacement for BaseEventLoop.__del__ that handles errors gracefully.
-    """
     try:
         if not self.is_closed():
             warnings.warn(f"unclosed event loop {self!r}", ResourceWarning, source=self)
             if not self.is_running():
                 self.close()
     except Exception:
-        # Silently ignore errors during shutdown cleanup
         pass
 
 
 def safe_event_loop_close(self):
-    """
-    Safe replacement for BaseEventLoop.close() that handles errors gracefully.
-    """
     try:
-        # Call the original close method
         if _original_close:
             _original_close(self)
     except ValueError as e:
-        # Silently ignore "Invalid file descriptor" errors during shutdown
         if "Invalid file descriptor" in str(e):
             pass
         else:
             raise
     except Exception:
-        # Log other errors but don't crash
         logger.debug(f"Error closing event loop: {e}")
 
 
 def apply_event_loop_cleanup_patch():
-    """
-    Apply patches to prevent BaseEventLoop.__del__ errors.
-    """
     global _original_del, _original_close, _cleanup_applied
     
     if _cleanup_applied:
@@ -76,9 +56,6 @@ def apply_event_loop_cleanup_patch():
 
 
 def remove_event_loop_cleanup_patch():
-    """
-    Remove patches and restore original behavior.
-    """
     global _original_del, _original_close, _cleanup_applied
     
     if not _cleanup_applied:
@@ -99,9 +76,6 @@ def remove_event_loop_cleanup_patch():
 
 
 def suppress_event_loop_warnings():
-    """
-    Suppress specific event loop warnings during shutdown.
-    """
     # Suppress ResourceWarnings about unclosed event loops
     warnings.filterwarnings("ignore", category=ResourceWarning, message=".*unclosed event loop.*")
     

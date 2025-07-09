@@ -1,5 +1,3 @@
-"""Dynamic model discovery for Songbird providers."""
-
 from .model_discovery import (
     ModelDiscoveryService,
     DiscoveredModel,

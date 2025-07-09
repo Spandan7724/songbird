@@ -1,7 +1,3 @@
-# songbird/tools/shell_exec.py
-"""
-Shell command execution tool for running terminal commands safely.
-"""
 import asyncio
 import os
 import platform
@@ -18,24 +14,24 @@ async def shell_exec(
     command: str, 
     working_dir: Optional[str] = None,
     timeout: float = 30.0,
-    max_output_size: int = 32768,  # Increased to 32KB
+    max_output_size: int = 32768,  
     show_live_output: bool = True
 ) -> Dict[str, Any]:
-    """
-    Execute a shell command safely with output capture and limits.
+
+    # Execute a shell command safely with output capture and limits.
     
-    Args:
-        command: Shell command to execute
-        working_dir: Working directory for command (defaults to current dir)
-        timeout: Timeout in seconds (default: 30)
-        max_output_size: Maximum output size in bytes (default: 32KB)
-        show_live_output: Whether to show output as it streams (default: True)
+    # Args:
+    #     command: Shell command to execute
+    #     working_dir: Working directory for command (defaults to current dir)
+    #     timeout: Timeout in seconds (default: 30)
+    #     max_output_size: Maximum output size in bytes (default: 32KB)
+    #     show_live_output: Whether to show output as it streams (default: True)
         
-    Returns:
-        Dictionary with execution results
-    """
+    # Returns:
+    #     Dictionary with execution results
+
     try:
-        # Validate working directory
+
         if working_dir:
             work_path = Path(working_dir)
             if not work_path.exists() or not work_path.is_dir():
@@ -47,27 +43,22 @@ async def shell_exec(
         else:
             working_dir = os.getcwd()
         
-        # Display command being executed
+
         console.print(f"\n[bold cyan]Executing command:[/bold cyan] {command}")
         console.print(f"[dim]Working directory: {working_dir}[/dim]\n")
         
-        # Prepare command for execution
         if platform.system() == "Windows":
-            # On Windows, use cmd.exe
             cmd_args = ["cmd", "/c", command]
             shell_prompt = ">"
         else:
-            # On Unix-like systems, use shell
             cmd_args = ["/bin/bash", "-c", command]
             shell_prompt = "$"
         
-        # Show command in a shell-like format
         shell_display = Text()
         shell_display.append(f"{shell_prompt} ", style="bold aquamarine1")
         shell_display.append(command, style="bold white")
         console.print(Panel(shell_display, title="Shell", title_align="left", border_style="aquamarine1"))
         
-        # Create subprocess
         process = await asyncio.create_subprocess_exec(
             *cmd_args,
             stdout=asyncio.subprocess.PIPE,
@@ -75,7 +66,6 @@ async def shell_exec(
             cwd=working_dir
         )
         
-        # Collect output with live streaming
         stdout_lines = []
         stderr_lines = []
         
@@ -87,15 +77,12 @@ async def shell_exec(
                 decoded_line = line.decode('utf-8', errors='replace')
                 output_list.append(decoded_line)
                 if show_live_output:
-                    # Print without newline since readline includes it
                     console.print(decoded_line.rstrip(), style=style)
         
-        # Start output collection
         if show_live_output:
             console.print("\n[bold]Output:[/bold]")
             console.rule(style="dim")
         
-        # Read both streams concurrently
         try:
             await asyncio.wait_for(
                 asyncio.gather(
@@ -105,11 +92,9 @@ async def shell_exec(
                 timeout=timeout
             )
             
-            # Wait for process to complete
             await asyncio.wait_for(process.wait(), timeout=1.0)
             
         except asyncio.TimeoutError:
-            # Kill the process if it times out
             process.kill()
             await process.wait()
             
@@ -123,11 +108,9 @@ async def shell_exec(
                 "timeout": True
             }
         
-        # Join output lines
         stdout = ''.join(stdout_lines)
         stderr = ''.join(stderr_lines)
         
-        # Check for output truncation
         output_truncated = False
         if len(stdout) > max_output_size:
             stdout = stdout[:max_output_size] + "\n... (output truncated)"
@@ -136,7 +119,6 @@ async def shell_exec(
             stderr = stderr[:max_output_size] + "\n... (output truncated)"
             output_truncated = True
         
-        # Determine success based on exit code
         exit_code = process.returncode
         success = (exit_code == 0)
         
@@ -144,9 +126,9 @@ async def shell_exec(
         if show_live_output:
             console.rule(style="dim")
             if success:
-                console.print(f"[bold green]✓ Command completed successfully[/bold green] (exit code: {exit_code})")
+                console.print(f"[dim]✓ Command completed successfully[/dim] (exit code: {exit_code})")
             else:
-                console.print(f"[bold red]✗ Command failed[/bold red] (exit code: {exit_code})")
+                console.print(f"[dim red]✗ Command failed[/dim red] (exit code: {exit_code})")
         
         result = {
             "success": success,
@@ -162,7 +144,6 @@ async def shell_exec(
             result["output_truncated"] = True
             
         if not success and not stderr:
-            # If command failed but no stderr, include stdout in error
             result["error"] = f"Command failed with exit code {exit_code}"
             
         return result
@@ -200,23 +181,14 @@ async def shell_exec(
 
 
 def is_command_safe(command: str) -> bool:
-    """
-    Check if a command is considered safe to execute.
-    This is a basic safety check - in production you might want more restrictions.
-    
-    Args:
-        command: Command to check
-        
-    Returns:
-        True if command appears safe, False otherwise
-    """
+    # Check if a command is considered safe to execute.
     dangerous_patterns = [
         "rm -rf /",
         "rm -rf /*",
         "mkfs",
         "dd if=/dev/zero",
         "dd if=/dev/urandom", 
-        ":(){ :|:& };:",  # Fork bomb
+        ":(){ :|:& };:",  
         "sudo rm -rf",
         "format c:",
         "format /",
@@ -229,12 +201,10 @@ def is_command_safe(command: str) -> bool:
     
     command_lower = command.lower().strip()
     
-    # Check each dangerous pattern
     for pattern in dangerous_patterns:
         if pattern.lower() in command_lower:
             return False
     
-    # Additional checks for Windows
     if platform.system() == "Windows":
         win_dangerous = ["format ", "cipher /w:", "sfc /scannow", "dism "]
         for pattern in win_dangerous:
@@ -251,12 +221,6 @@ async def shell_exec_safe(
     max_output_size: int = 32768,
     show_live_output: bool = True
 ) -> Dict[str, Any]:
-    """
-    Execute a shell command with safety checks.
-    
-    This is a wrapper around shell_exec that adds safety validation.
-    """
-    # Check if command is safe
     if not is_command_safe(command):
         console.print("\n[bold red]Safety check failed![/bold red] This command appears potentially dangerous.")
         console.print(f"Command: {command}")
@@ -269,7 +233,6 @@ async def shell_exec_safe(
             "safety_blocked": True
         }
     
-    # Execute the command
     return await shell_exec(
         command=command,
         working_dir=working_dir,
