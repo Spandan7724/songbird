@@ -6,7 +6,7 @@ Replaces hardcoded concept groups with intelligent analysis.
 
 import json
 import re
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from ..llm.providers import BaseProvider
 from .semantic_config import get_semantic_config
 
@@ -17,10 +17,67 @@ class SemanticMatcher:
     Provides intelligent duplicate detection and content similarity analysis.
     """
     
-    def __init__(self, llm_provider: BaseProvider):
+    def __init__(self, llm_provider: Optional[BaseProvider] = None):
         self.llm_provider = llm_provider
         self._cache = {}
         self.config = get_semantic_config()
+        
+        # Consolidated hardcoded fallback data (replaces scattered lists across codebase)
+        self._fallback_keywords = self._get_consolidated_fallback_keywords()
+    
+    def _get_consolidated_fallback_keywords(self) -> Dict[str, Any]:
+        """Get all consolidated hardcoded keywords for fallback behavior."""
+        return {
+            'priority': {
+                'high': ['urgent', 'critical', 'important', 'fix', 'bug', 'error', 'broken', 
+                        'failing', 'security', 'deploy', 'release'],
+                'low': ['cleanup', 'refactor', 'documentation', 'docs', 'comment', 'optimize', 
+                       'improve', 'enhance', 'consider', 'maybe']
+            },
+            'action_verbs': [
+                'implement', 'create', 'add', 'build', 'develop', 'write',
+                'fix', 'debug', 'resolve', 'solve', 'repair',
+                'update', 'modify', 'change', 'edit', 'refactor',
+                'test', 'validate', 'verify', 'check',
+                'remove', 'delete', 'clean', 'cleanup',
+                'analyze', 'research', 'investigate', 'explore',
+                'design', 'plan', 'configure', 'setup'
+            ],
+            'stop_words': {
+                'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
+                'before', 'after', 'above', 'below', 'between', 'this', 'that', 'these',
+                'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves'
+            },
+            'prefixes_to_remove': [
+                'todo:', 'task:', 'step:', 'action:', 'next:', 'now:', 'please',
+                'need to', 'should', 'must', 'will', 'going to', 'plan to'
+            ],
+            'completion_keywords': [
+                'done', 'finished', 'completed', 'fixed', 'implemented', 
+                'resolved', 'working', 'solved'
+            ],
+            'concept_groups': {
+                'analysis': {'analyze', 'examine', 'review', 'investigate', 'study', 'inspect', 'assess', 'evaluate'},
+                'implementation': {'implement', 'create', 'build', 'develop', 'code', 'write', 'add', 'construct'},
+                'modification': {'refactor', 'update', 'modify', 'change', 'edit', 'improve', 'enhance', 'optimize'},
+                'testing': {'test', 'validate', 'verify', 'check', 'ensure', 'confirm', 'qa'},
+                'documentation': {'document', 'docs', 'documentation', 'comment', 'readme', 'wiki'},
+                'debugging': {'fix', 'debug', 'resolve', 'solve', 'repair', 'troubleshoot', 'handle', 'address'},
+                'structure': {'structure', 'architecture', 'design', 'layout', 'organization', 'framework'},
+                'performance': {'performance', 'optimize', 'speed', 'efficiency', 'bottleneck', 'latency'},
+                'codebase': {'codebase', 'code', 'project', 'application', 'system', 'repo', 'repository'},
+                'maintenance': {'maintain', 'maintainability', 'cleanup', 'clean', 'organize', 'manage'}
+            },
+            'action_groups': {
+                'create': {'create', 'add', 'build', 'implement', 'develop', 'write', 'establish'},
+                'modify': {'update', 'modify', 'change', 'edit', 'refactor', 'improve', 'enhance'},
+                'analyze': {'analyze', 'examine', 'review', 'investigate', 'study', 'assess'},
+                'fix': {'fix', 'debug', 'resolve', 'solve', 'repair', 'address', 'handle'},
+                'test': {'test', 'validate', 'verify', 'check', 'ensure'},
+                'remove': {'remove', 'delete', 'clean', 'cleanup', 'clear'}
+            }
+        }
     
     async def calculate_semantic_similarity(self, content1: str, content2: str) -> float:
         """
@@ -81,6 +138,10 @@ class SemanticMatcher:
         Returns:
             Priority level: "high", "medium", or "low"
         """
+        # Check if LLM priority analysis is enabled
+        if not self.config.enable_llm_priority or not self.llm_provider:
+            return self._fallback_priority(content)
+        
         # Build priority analysis prompt
         prompt = self._build_priority_prompt(content, context)
         
@@ -94,11 +155,138 @@ class SemanticMatcher:
                 if priority:
                     return priority
             
-        except Exception:
-            # Fall back to simple heuristics
-            return self._fallback_priority(content)
+        except Exception as e:
+            # Check if fallback is enabled
+            if self.config.fallback_to_heuristics:
+                return self._fallback_priority(content)
+            else:
+                raise e
         
         return self._fallback_priority(content)
+    
+    async def normalize_todo_content(self, content: str) -> str:
+        """
+        Normalize todo content by removing prefixes and cleaning text using LLM analysis.
+        
+        Args:
+            content: Todo content to normalize
+            
+        Returns:
+            Normalized content string
+        """
+        if self.config.enable_llm_normalization and self.llm_provider:
+            prompt = self._build_normalization_prompt(content)
+            
+            try:
+                messages = [{"role": "user", "content": prompt}]
+                response = await self.llm_provider.chat_with_messages(messages)
+                
+                if response.content:
+                    normalized = self._parse_normalization_response(response.content)
+                    if normalized:
+                        return normalized
+                        
+            except Exception:
+                if self.config.fallback_to_heuristics:
+                    return self._fallback_normalize_content(content)
+                else:
+                    raise
+        
+        return self._fallback_normalize_content(content)
+    
+    async def extract_primary_action(self, content: str) -> Optional[str]:
+        """
+        Extract the primary action verb from todo content using LLM analysis.
+        
+        Args:
+            content: Todo content to analyze
+            
+        Returns:
+            Primary action verb or None if not found
+        """
+        if self.config.enable_llm_action_extraction and self.llm_provider:
+            prompt = self._build_action_extraction_prompt(content)
+            
+            try:
+                messages = [{"role": "user", "content": prompt}]
+                response = await self.llm_provider.chat_with_messages(messages)
+                
+                if response.content:
+                    action = self._parse_action_response(response.content)
+                    if action:
+                        return action
+                        
+            except Exception:
+                if self.config.fallback_to_heuristics:
+                    return self._fallback_extract_action(content)
+                else:
+                    raise
+        
+        return self._fallback_extract_action(content)
+    
+    async def detect_completion_signals(self, message: str, todos: List[str]) -> List[str]:
+        """
+        Detect which todos are indicated as completed in a message using LLM analysis.
+        
+        Args:
+            message: User message to analyze
+            todos: List of active todo contents
+            
+        Returns:
+            List of todo contents that appear to be completed
+        """
+        if not todos:
+            return []
+            
+        if self.config.enable_llm_completion_detection and self.llm_provider:
+            prompt = self._build_completion_detection_prompt(message, todos)
+            
+            try:
+                messages = [{"role": "user", "content": prompt}]
+                response = await self.llm_provider.chat_with_messages(messages)
+                
+                if response.content:
+                    completed = self._parse_completion_response(response.content)
+                    if completed:
+                        return completed
+                        
+            except Exception:
+                if self.config.fallback_to_heuristics:
+                    return self._fallback_detect_completion(message, todos)
+                else:
+                    raise
+        
+        return self._fallback_detect_completion(message, todos)
+    
+    async def categorize_todo_concept(self, content: str) -> str:
+        """
+        Categorize todo content into concept groups using LLM analysis.
+        
+        Args:
+            content: Todo content to categorize
+            
+        Returns:
+            Category name (e.g., 'implementation', 'testing', 'debugging')
+        """
+        if self.config.enable_llm_categorization and self.llm_provider:
+            prompt = self._build_categorization_prompt(content)
+            
+            try:
+                messages = [{"role": "user", "content": prompt}]
+                response = await self.llm_provider.chat_with_messages(messages)
+                
+                if response.content:
+                    category = self._parse_categorization_response(response.content)
+                    if category:
+                        return category
+                        
+            except Exception:
+                if self.config.fallback_to_heuristics:
+                    return self._fallback_categorize_concept(content)
+                else:
+                    raise
+        
+        return self._fallback_categorize_concept(content)
     
     def _get_cache_key(self, content1: str, content2: str) -> str:
         """Generate cache key for similarity comparison."""
@@ -169,6 +357,111 @@ Respond with ONLY a JSON object in this exact format:
 }}
 """
     
+    def _build_normalization_prompt(self, content: str) -> str:
+        """Build the content normalization prompt for the LLM."""
+        return f"""
+Normalize this todo/task content by cleaning and standardizing it:
+
+Original: "{content}"
+
+Tasks:
+1. Remove common prefixes like "todo:", "task:", "need to", "should", etc.
+2. Convert to a clear, concise action statement
+3. Remove unnecessary words while preserving meaning
+4. Maintain the core action and objective
+
+Respond with ONLY a JSON object in this exact format:
+{{
+  "normalized": "cleaned content",
+  "action": "primary action verb",
+  "reasoning": "brief explanation of changes"
+}}
+
+Examples:
+- "TODO: Need to implement user login system" → "Implement user login system"
+- "Should refactor the database code" → "Refactor database code"
+- "We need to fix the login bug" → "Fix login bug"
+"""
+    
+    def _build_action_extraction_prompt(self, content: str) -> str:
+        """Build the action extraction prompt for the LLM."""
+        return f"""
+Extract the primary action verb from this todo/task:
+
+Task: "{content}"
+
+Identify the main action that this task involves. Focus on verbs like:
+- implement, create, add, build, develop, write
+- fix, debug, resolve, solve, repair
+- update, modify, change, edit, refactor
+- test, validate, verify, check
+- remove, delete, clean, cleanup
+- analyze, research, investigate, explore
+
+Respond with ONLY a JSON object in this exact format:
+{{
+  "action": "primary action verb",
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}}
+
+If no clear action is found, use "action": null
+"""
+    
+    def _build_completion_detection_prompt(self, message: str, todos: List[str]) -> str:
+        """Build the completion detection prompt for the LLM."""
+        todos_list = "\n".join([f"- {todo}" for todo in todos])
+        
+        return f"""
+Analyze this user message to determine which active todos appear to be completed:
+
+User Message: "{message}"
+
+Active Todos:
+{todos_list}
+
+Look for completion indicators like:
+- "done", "finished", "completed", "fixed", "implemented", "resolved"
+- Past tense descriptions of the work
+- Statements about successful completion
+- References to having solved or addressed the task
+
+Respond with ONLY a JSON object in this exact format:
+{{
+  "completed_todos": ["todo content 1", "todo content 2"],
+  "reasoning": "brief explanation of completion signals detected"
+}}
+
+If no todos appear completed, use "completed_todos": []
+"""
+    
+    def _build_categorization_prompt(self, content: str) -> str:
+        """Build the categorization prompt for the LLM."""
+        return f"""
+Categorize this todo/task into one of these concept groups:
+
+Task: "{content}"
+
+Categories:
+- analysis: analyze, examine, review, investigate, study, assess
+- implementation: implement, create, build, develop, code, write, add
+- modification: refactor, update, modify, change, edit, improve, enhance
+- testing: test, validate, verify, check, ensure, confirm
+- documentation: document, docs, comment, readme, wiki
+- debugging: fix, debug, resolve, solve, repair, troubleshoot
+- structure: architecture, design, layout, organization, framework
+- performance: optimize, speed, efficiency, bottleneck, latency
+- codebase: code management, project organization, repository
+- maintenance: maintain, cleanup, organize, manage
+
+Respond with ONLY a JSON object in this exact format:
+{{
+  "category": "category_name",
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}}
+"""
+    
     def _parse_similarity_response(self, response_content: str) -> Optional[float]:
         """Parse the LLM similarity response."""
         try:
@@ -209,6 +502,88 @@ Respond with ONLY a JSON object in this exact format:
         
         return None
     
+    def _parse_normalization_response(self, response_content: str) -> Optional[str]:
+        """Parse the LLM normalization response."""
+        try:
+            json_match = re.search(r'\{.*?\}', response_content, re.DOTALL)
+            if not json_match:
+                return None
+            
+            json_str = json_match.group(0)
+            data = json.loads(json_str)
+            
+            normalized = data.get('normalized')
+            if isinstance(normalized, str) and normalized.strip():
+                return normalized.strip()
+            
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            pass
+        
+        return None
+    
+    def _parse_action_response(self, response_content: str) -> Optional[str]:
+        """Parse the LLM action extraction response."""
+        try:
+            json_match = re.search(r'\{.*?\}', response_content, re.DOTALL)
+            if not json_match:
+                return None
+            
+            json_str = json_match.group(0)
+            data = json.loads(json_str)
+            
+            action = data.get('action')
+            if isinstance(action, str) and action.strip():
+                return action.strip().lower()
+            
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            pass
+        
+        return None
+    
+    def _parse_completion_response(self, response_content: str) -> List[str]:
+        """Parse the LLM completion detection response."""
+        try:
+            json_match = re.search(r'\{.*?\}', response_content, re.DOTALL)
+            if not json_match:
+                return []
+            
+            json_str = json_match.group(0)
+            data = json.loads(json_str)
+            
+            completed = data.get('completed_todos', [])
+            if isinstance(completed, list):
+                return [todo for todo in completed if isinstance(todo, str)]
+            
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            pass
+        
+        return []
+    
+    def _parse_categorization_response(self, response_content: str) -> Optional[str]:
+        """Parse the LLM categorization response."""
+        try:
+            json_match = re.search(r'\{.*?\}', response_content, re.DOTALL)
+            if not json_match:
+                return None
+            
+            json_str = json_match.group(0)
+            data = json.loads(json_str)
+            
+            category = data.get('category')
+            valid_categories = {
+                'analysis', 'implementation', 'modification', 'testing', 
+                'documentation', 'debugging', 'structure', 'performance', 
+                'codebase', 'maintenance'
+            }
+            
+            if isinstance(category, str) and category.lower() in valid_categories:
+                return category.lower()
+            
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            pass
+        
+        return None
+    
     def _fallback_similarity(self, content1: str, content2: str) -> float:
         """Simple fallback similarity calculation."""
         # Normalize content
@@ -232,31 +607,28 @@ Respond with ONLY a JSON object in this exact format:
         return len(intersection) / len(union) if union else 0.0
     
     def _fallback_priority(self, content: str) -> str:
-        """Simple fallback priority determination."""
+        """Simple fallback priority determination using consolidated keywords."""
         content_lower = content.lower()
         
-        # High priority keywords
-        high_keywords = ['urgent', 'critical', 'fix', 'bug', 'error', 'security', 'broken', 'failing']
-        if any(keyword in content_lower for keyword in high_keywords):
+        # Use consolidated high priority keywords
+        if any(keyword in content_lower for keyword in self._fallback_keywords['priority']['high']):
             return 'high'
         
-        # Low priority keywords
-        low_keywords = ['cleanup', 'documentation', 'docs', 'comment', 'optimize', 'refactor']
-        if any(keyword in content_lower for keyword in low_keywords):
+        # Use consolidated low priority keywords
+        if any(keyword in content_lower for keyword in self._fallback_keywords['priority']['low']):
             return 'low'
         
         return 'medium'
     
-    def _normalize_content(self, content: str) -> str:
-        """Normalize content for comparison."""
+    def _fallback_normalize_content(self, content: str) -> str:
+        """Fallback content normalization using consolidated keywords."""
         import re
         
         # Convert to lowercase and strip
         normalized = content.lower().strip()
         
-        # Remove common prefixes
-        prefixes = ['todo:', 'task:', 'need to', 'should', 'must']
-        for prefix in prefixes:
+        # Remove common prefixes using consolidated list
+        for prefix in self._fallback_keywords['prefixes_to_remove']:
             if normalized.startswith(prefix):
                 normalized = normalized[len(prefix):].strip()
         
@@ -265,6 +637,65 @@ Respond with ONLY a JSON object in this exact format:
         normalized = re.sub(r'\s+', ' ', normalized)
         
         return normalized.strip()
+    
+    def _fallback_extract_action(self, content: str) -> Optional[str]:
+        """Fallback action extraction using consolidated action verbs."""
+        content_lower = content.lower()
+        words = content_lower.split()
+        
+        # Find first action verb in the consolidated list
+        for word in words:
+            # Remove punctuation from word
+            clean_word = re.sub(r'[^\w]', '', word)
+            if clean_word in self._fallback_keywords['action_verbs']:
+                return clean_word
+        
+        return None
+    
+    def _fallback_detect_completion(self, message: str, todos: List[str]) -> List[str]:
+        """Fallback completion detection using consolidated completion keywords."""
+        message_lower = message.lower()
+        completed = []
+        
+        # Check if message contains completion keywords
+        has_completion_signal = any(
+            keyword in message_lower 
+            for keyword in self._fallback_keywords['completion_keywords']
+        )
+        
+        if has_completion_signal:
+            # Simple matching: if message mentions todo words and has completion signal
+            for todo in todos:
+                todo_words = set(todo.lower().split())
+                message_words = set(message_lower.split())
+                
+                # If todo words overlap significantly with message, consider it completed
+                if len(todo_words.intersection(message_words)) >= 2:
+                    completed.append(todo)
+        
+        return completed
+    
+    def _fallback_categorize_concept(self, content: str) -> str:
+        """Fallback concept categorization using consolidated concept groups."""
+        content_lower = content.lower()
+        words = set(content_lower.split())
+        
+        # Score each category based on word matches
+        category_scores = {}
+        for category, keywords in self._fallback_keywords['concept_groups'].items():
+            score = len(words.intersection(keywords))
+            if score > 0:
+                category_scores[category] = score
+        
+        # Return category with highest score, default to 'implementation'
+        if category_scores:
+            return max(category_scores.items(), key=lambda x: x[1])[0]
+        else:
+            return 'implementation'  # Default category
+    
+    def _normalize_content(self, content: str) -> str:
+        """Legacy method for backward compatibility - delegates to fallback."""
+        return self._fallback_normalize_content(content)
     
     def clear_cache(self):
         """Clear the similarity cache."""

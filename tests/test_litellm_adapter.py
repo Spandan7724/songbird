@@ -603,12 +603,12 @@ class TestLiteLLMAdapterEnvironmentValidation:
 class TestLiteLLMProviderFactory:
     """Test LiteLLM provider factory function."""
     
-    @patch('songbird.config.load_provider_mapping')
+    @patch('songbird.config.mapping_loader.load_provider_mapping')
     def test_create_litellm_provider_basic(self, mock_load_config):
         """Test basic provider creation with factory function."""
         # Mock configuration
         mock_config = Mock()
-        mock_config.resolve_model_string.return_value = "openai/gpt-4o"
+        mock_config.get_default_model.return_value = "gpt-4o"
         mock_config.get_api_base.return_value = None
         mock_load_config.return_value = mock_config
         
@@ -619,14 +619,15 @@ class TestLiteLLMProviderFactory:
         assert provider.vendor_prefix == "openai"
         assert provider.model_name == "gpt-4o"
         
-        mock_config.resolve_model_string.assert_called_once_with("openai", "gpt-4o")
+        # Since model was provided, get_default_model should not be called
+        mock_config.get_default_model.assert_not_called()
     
-    @patch('songbird.config.load_provider_mapping')
+    @patch('songbird.config.mapping_loader.load_provider_mapping')
     def test_create_litellm_provider_with_api_base(self, mock_load_config):
         """Test provider creation with custom API base URL."""
         # Mock configuration
         mock_config = Mock()
-        mock_config.resolve_model_string.return_value = "openrouter/anthropic/claude-3.5-sonnet"
+        mock_config.get_default_model.return_value = "anthropic/claude-3.5-sonnet"
         mock_config.get_api_base.return_value = "https://openrouter.ai/api/v1"
         mock_load_config.return_value = mock_config
         
@@ -639,7 +640,7 @@ class TestLiteLLMProviderFactory:
         # Explicit api_base should take priority over config
         assert provider.api_base == "https://custom.api.com/v1"
     
-    @patch('songbird.config.load_provider_mapping')
+    @patch('songbird.config.mapping_loader.load_provider_mapping')
     def test_create_litellm_provider_config_error(self, mock_load_config):
         """Test provider creation handles configuration errors."""
         mock_load_config.side_effect = Exception("Config loading failed")

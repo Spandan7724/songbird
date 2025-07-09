@@ -1,4 +1,3 @@
-# songbird/llm/unified_interface.py
 """Provider adapter for capability detection and management."""
 
 from typing import Dict, List, Any
@@ -24,7 +23,6 @@ except ImportError:
 
 
 class ProviderAdapter:
-    """Adapter that provides unified interface for provider capabilities."""
     
     def __init__(self, provider_instance):
         self.provider = provider_instance
@@ -35,7 +33,6 @@ class ProviderAdapter:
             self.tool_registry = None
     
     def _detect_provider_name(self) -> str:
-        """Detect provider name from the instance."""
         class_name = self.provider.__class__.__name__.lower()
         if "ollama" in class_name:
             return "ollama"
@@ -53,14 +50,12 @@ class ProviderAdapter:
             return "unknown"
     
     def get_unified_tools_schema(self) -> List[Dict[str, Any]]:
-        """Get tools formatted for the current provider."""
         if self.tool_registry:
             return self.tool_registry.get_llm_schemas(self.provider_name)
         else:
             return []  # Return empty list if tool registry not available
     
     def prepare_messages_for_provider(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Prepare messages for provider-specific format requirements."""
         if self.provider_name == "claude":
             # Claude needs special handling for system messages
             processed_messages = []
@@ -87,7 +82,6 @@ class ProviderAdapter:
             return messages
     
     def create_unified_response(self, response: Any) -> ChatResponse:
-        """Create a unified response from provider-specific response."""
         # Use the provider's existing conversion method
         if hasattr(self.provider, '_convert_ollama_response_to_songbird') and self.provider_name == "ollama":
             return self.provider._convert_ollama_response_to_songbird(response)

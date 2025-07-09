@@ -3,10 +3,8 @@ Integration tests for the complete @file reference feature.
 """
 
 import tempfile
-import os
 from pathlib import Path
 import pytest
-import asyncio
 
 from songbird.commands.file_reference_parser import FileReferenceParser
 from songbird.agent.context_manager import FileContextManager

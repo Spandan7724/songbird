@@ -1,4 +1,3 @@
-# songbird/memory/optimized_manager.py
 """Optimized session manager with batch writes and idle timeout."""
 
 import asyncio
@@ -57,7 +56,6 @@ class OptimizedSessionManager:
             return self.working_directory
     
     def _get_storage_dir(self) -> Path:
-        """Get the storage directory for this project."""
         project_path_str = str(self.project_root)
         safe_name = project_path_str.replace(os.sep, "-").replace(":", "")
         
@@ -215,14 +213,10 @@ class OptimizedSessionManager:
             raise e
     
     def save_session(self, session: Session):
-        """Save a session (adds to batch, doesn't immediately write)."""
-        # Update in-memory copy
         self._sessions[session.id] = session
         self._mark_dirty(session.id)
     
     async def flush_session(self, session: Session):
-        """Force immediate flush of a session to disk."""
-        # Update in-memory copy first
         self._sessions[session.id] = session
         self._mark_dirty(session.id)
         
@@ -230,8 +224,6 @@ class OptimizedSessionManager:
         await self._flush_session(session.id)
     
     def flush_session_sync(self, session: Session):
-        """Force immediate flush of a session to disk (synchronous)."""
-        # Update in-memory copy first
         self._sessions[session.id] = session
         self._mark_dirty(session.id)
         
@@ -239,18 +231,14 @@ class OptimizedSessionManager:
         self._flush_session_sync(session.id)
     
     async def flush_all_sessions(self):
-        """Force flush all dirty sessions."""
         for session_id in list(self._dirty_sessions):
             await self._flush_session(session_id)
     
     def _flush_all_sessions_sync(self):
-        """Synchronously flush all dirty sessions."""
         for session_id in list(self._dirty_sessions):
             self._flush_session_sync(session_id)
     
     def load_session(self, session_id: str) -> Optional[Session]:
-        """Load a session from cache or disk."""
-        # Check in-memory cache first
         if session_id in self._sessions:
             return self._sessions[session_id]
         

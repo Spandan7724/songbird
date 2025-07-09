@@ -1,4 +1,3 @@
-# songbird/config/mapping_loader.py
 """Provider mapping configuration loader with user extensibility support."""
 
 import tomllib
@@ -9,8 +8,6 @@ from rich.console import Console
 console = Console()
 
 class MappingConfig:
-    """Container for provider mapping configuration."""
-    
     def __init__(self, config_data: Dict[str, Any]):
         self.data = config_data
         self.defaults = config_data.get("defaults", {})
@@ -19,30 +16,23 @@ class MappingConfig:
         self.provider_config = config_data.get("provider_config", {})
     
     def get_default_model(self, provider: str) -> Optional[str]:
-        """Get the default LiteLLM model string for a provider."""
         return self.defaults.get(provider)
     
     def get_api_base(self, provider: str) -> Optional[str]:
-        """Get the API base URL for a provider if needed."""
         return self.urls.get(provider)
     
     def get_model_mapping(self, provider: str, model: str) -> Optional[str]:
-        """Get the LiteLLM model string for a provider/model combination."""
         provider_models = self.models.get(provider, {})
         return provider_models.get(model)
     
     def get_available_models(self, provider: str) -> List[str]:
-        """Get list of available models for a provider."""
         return list(self.models.get(provider, {}).keys())
     
     def get_provider_config(self, provider: str) -> Dict[str, Any]:
-        """Get configuration for a specific provider."""
         return self.provider_config.get(provider, {})
     
     def resolve_model_string(self, provider: str, model: Optional[str] = None) -> str:
-        """Resolve a provider/model combination to a LiteLLM model string."""
         if model:
-            # Try exact mapping first
             mapped = self.get_model_mapping(provider, model)
             if mapped:
                 return mapped
@@ -62,7 +52,6 @@ class MappingConfig:
 
 
 def validate_mapping_config(config_data: Dict[str, Any]) -> List[str]:
-    """Validate provider mapping configuration and return list of issues."""
     issues = []
     
     # Most providers use standard provider/model format
@@ -108,7 +97,6 @@ def validate_mapping_config(config_data: Dict[str, Any]) -> List[str]:
 
 
 def _should_validate_provider_format(provider: str, model_string: str) -> bool:
-    """Check if a model string should be validated for provider/model format."""
     # Copilot uses custom provider, no validation needed
     if provider == "copilot":
         return False
@@ -122,8 +110,6 @@ def _should_validate_provider_format(provider: str, model_string: str) -> bool:
 
 
 def load_provider_mapping() -> MappingConfig:
-    """Load provider mapping configuration with user extensibility and validation."""
-    # Start with default configuration
     default_config_path = Path(__file__).parent / "provider_mapping.toml"
     
     if not default_config_path.exists():
@@ -174,7 +160,6 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 
 
 def validate_mapping_config_instance(config: MappingConfig) -> List[str]:
-    """Validate the mapping configuration instance and return any issues."""
     issues = []
     
     # Check that all providers have defaults
@@ -200,7 +185,6 @@ def validate_mapping_config_instance(config: MappingConfig) -> List[str]:
 
 
 def get_available_providers() -> List[str]:
-    """Get list of all available providers."""
     try:
         config = load_provider_mapping()
         return list(config.defaults.keys())

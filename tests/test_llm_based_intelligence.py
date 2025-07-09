@@ -6,6 +6,7 @@ Tests the replacement of hardcoded word lists with smart LLM analysis.
 
 import asyncio
 import sys
+import pytest
 from pathlib import Path
 
 # Add the songbird directory to Python path
@@ -111,6 +112,7 @@ class MockResponse:
         self.content = content
 
 
+@pytest.mark.asyncio
 async def test_message_classifier():
     """Test the LLM-based message classifier."""
     print("🧪 Testing LLM-Based Message Classifier")
@@ -160,6 +162,7 @@ async def test_message_classifier():
     print()
 
 
+@pytest.mark.asyncio
 async def test_semantic_matcher():
     """Test the LLM-based semantic matcher."""
     print("🧪 Testing LLM-Based Semantic Matcher")

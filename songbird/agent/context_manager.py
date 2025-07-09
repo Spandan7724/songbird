@@ -3,7 +3,7 @@
 
 import os
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from dataclasses import dataclass
 
 from ..commands.file_reference_parser import FileReferenceParser, FileReference

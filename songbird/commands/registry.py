@@ -1,4 +1,3 @@
-# songbird/commands/registry.py
 """
 Command registry for managing available commands.
 """
@@ -22,7 +21,6 @@ class CommandRegistry:
             self._commands[alias] = command
     
     def get_command(self, name: str) -> Optional[BaseCommand]:
-        """Get a command by name or alias."""
         return self._commands.get(name)
     
     def get_all_commands(self) -> List[BaseCommand]:
@@ -36,7 +34,6 @@ class CommandRegistry:
         return commands
     
     def search_commands(self, query: str) -> List[BaseCommand]:
-        """Search commands by name or description."""
         query = query.lower()
         matches = []
         
@@ -49,7 +46,6 @@ class CommandRegistry:
         return matches
     
     def is_command(self, text: str) -> bool:
-        """Check if text starts with a command."""
         if not text.startswith('/'):
             return False
         
@@ -60,10 +56,8 @@ class CommandRegistry:
         return command_name in self._commands
 
 
-# Global registry instance
 _registry = CommandRegistry()
 
 
 def get_command_registry() -> CommandRegistry:
-    """Get the global command registry."""
     return _registry

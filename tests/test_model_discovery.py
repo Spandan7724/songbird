@@ -193,17 +193,12 @@ async def test_model_command_integration():
     assert isinstance(models, list)
     assert len(models) > 0
     
-    # Test legacy model discovery
-    models = await cmd._get_available_models("gemini")
-    assert isinstance(models, list)
-    assert len(models) > 0
-    
     # Test Copilot model discovery
     models = await cmd._get_litellm_models("copilot")
     assert isinstance(models, list)
     assert len(models) > 0
     
-    models = await cmd._get_available_models("copilot")
+    models = await cmd._get_copilot_models()
     assert isinstance(models, list)
     assert len(models) > 0
 

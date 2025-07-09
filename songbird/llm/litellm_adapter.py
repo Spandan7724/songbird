@@ -1,4 +1,3 @@
-# songbird/llm/litellm_adapter.py
 """LiteLLM adapter providing unified interface for all providers."""
 
 import asyncio
@@ -6,38 +5,30 @@ import litellm
 import logging
 from typing import AsyncGenerator, List, Dict, Any, Optional
 from rich.console import Console
-# Removed legacy UnifiedProviderInterface import
 from .types import ChatResponse
 from .http_session_manager import session_manager
-
-# HTTP session management is now handled by http_session_manager
 
 console = Console()
 logger = logging.getLogger(__name__)
 
 
 class LiteLLMError(Exception):
-    """Base exception for LiteLLM adapter errors."""
     pass
 
 
 class LiteLLMConnectionError(LiteLLMError):
-    """Connection-related errors."""
     pass
 
 
 class LiteLLMAuthenticationError(LiteLLMError):
-    """Authentication-related errors."""
     pass
 
 
 class LiteLLMRateLimitError(LiteLLMError):
-    """Rate limit exceeded errors."""
     pass
 
 
 class LiteLLMModelError(LiteLLMError):
-    """Model-related errors (not found, not supported, etc.)."""
     pass
 
 
@@ -51,22 +42,16 @@ class LiteLLMAdapter:
         provider_name: Optional[str] = None,
         **kwargs,
     ):
-        """
-        Initialize LiteLLM adapter.
-        
-        Args:
-            model: Model string (e.g., "gpt-4o", "gemini-2.0-flash-001") or LiteLLM string
-            api_base: Optional custom API base URL
-            provider_name: The provider name (e.g., "openai", "gemini", "ollama")
-            **kwargs: Additional parameters (temperature, max_tokens, etc.)
-        """
+
         # ------------------------------------------------------------------
         # Guarantee the model starts with the right provider prefix exactly once.
-        # This is idempotent and handles complex cases like:
+        # This handles complex cases like:
         # deepseek/deepseek-chat-v3-0324:free -> openrouter/deepseek/deepseek-chat-v3-0324:free
         # ------------------------------------------------------------------
         if provider_name and not model.startswith(f"{provider_name}/"):
             model = f"{provider_name}/{model}"
+        elif not provider_name and "/" not in model:
+            model = f"openai/{model}"
 
         self.model = model
         self.api_base = api_base
@@ -99,12 +84,9 @@ class LiteLLMAdapter:
         self._ensure_managed_session()
     
     def _ensure_managed_session(self):
-        """Set up LiteLLM to use our managed HTTP session."""
-        # This will be called to set up the session when first API call is made
         self._session_initialized = False
     
     async def _setup_managed_session(self):
-        """Actually set up the managed session (async operation)."""
         if not self._session_initialized:
             try:
                 # Try aiohttp session first (better for closing orphaned sessions)
@@ -136,12 +118,6 @@ class LiteLLMAdapter:
                 logger.warning(f"Failed to set up managed session, LiteLLM will use default: {e}")
     
     async def get_session_health(self) -> dict:
-        """
-        Get detailed session health information for monitoring.
-        
-        Returns:
-            dict: Health status and metrics
-        """
         try:
             is_healthy = await session_manager.health_check()
             
@@ -164,15 +140,12 @@ class LiteLLMAdapter:
             }
     
     async def __aenter__(self):
-        """Async context manager entry."""
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit with cleanup."""
         await self.cleanup()
     
     async def cleanup(self):
-        """Clean up HTTP sessions using both session managers."""
         try:
             logger.debug("Cleaning up LiteLLM adapter resources")
             
@@ -201,7 +174,6 @@ class LiteLLMAdapter:
             logger.debug(f"Cleanup error (non-critical): {e}")
     
     async def _cleanup_http_sessions(self):
-        """Clean up HTTP sessions after API calls."""
         try:
             # Since we're using httpx with managed sessions,
             # cleanup is handled by the session manager
@@ -211,24 +183,15 @@ class LiteLLMAdapter:
             logger.debug(f"HTTP session cleanup error (non-critical): {e}")
     
     def get_provider_name(self) -> str:
-        """Get the provider name."""
         return self.vendor_prefix
     
     def get_model_name(self) -> str:
-        """Get the current model name."""
         return self.model_name
     
     async def chat_with_messages(self, messages: List[Dict[str, Any]], 
                                 tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
         """
         Non-streaming chat completion using LiteLLM.
-        
-        Args:
-            messages: List of message dictionaries
-            tools: Optional list of tool schemas (OpenAI format)
-            
-        Returns:
-            ChatResponse: Unified response format
         """
         try:
             # Check if model changed and flush state if needed
@@ -313,13 +276,6 @@ class LiteLLMAdapter:
                          tools: List[Dict[str, Any]]) -> AsyncGenerator[dict, None]:
         """
         Streaming chat completion using LiteLLM.
-        
-        Args:
-            messages: List of message dictionaries
-            tools: List of tool schemas (OpenAI format)
-            
-        Yields:
-            dict: Normalized streaming chunks
         """
         try:
             # Check if model changed and flush state if needed
@@ -443,12 +399,6 @@ class LiteLLMAdapter:
     def _normalize_chunk(self, chunk: dict) -> dict:
         """
         Normalize LiteLLM chunk to unified format.
-        
-        Args:
-            chunk: Raw LiteLLM chunk in OpenAI delta format
-            
-        Returns:
-            dict: Normalized chunk for Songbird
         """
         choices = chunk.get("choices", [])
         if not choices:
@@ -470,13 +420,6 @@ class LiteLLMAdapter:
     def _handle_completion_error(self, error: Exception, operation: str) -> Exception:
         """
         Handle and classify LiteLLM errors with detailed logging.
-        
-        Args:
-            error: The original exception
-            operation: The operation being performed ("completion" or "streaming")
-            
-        Returns:
-            Exception: Classified exception with helpful context
         """
         error_msg = str(error).lower()
         context = f"{self.vendor_prefix} {operation}"
@@ -538,7 +481,6 @@ class LiteLLMAdapter:
         return fallback_candidates[0]
     
     def _is_ollama_model_not_found_error(self, error: Exception) -> bool:
-        """Check if error indicates Ollama model not found (for fallback logic)."""
         if self.vendor_prefix != "ollama":
             return False
         
@@ -569,7 +511,6 @@ class LiteLLMAdapter:
         return False
     
     def _get_auth_error_help(self, provider: str) -> str:
-        """Get provider-specific authentication help."""
         auth_help = {
             "openai": "Set OPENAI_API_KEY environment variable. Get your key from: https://platform.openai.com/api-keys",
             "anthropic": "Set ANTHROPIC_API_KEY environment variable. Get your key from: https://console.anthropic.com/account/keys",
@@ -584,12 +525,6 @@ class LiteLLMAdapter:
     def _convert_to_songbird_response(self, response) -> ChatResponse:
         """
         Convert LiteLLM response to Songbird ChatResponse format.
-        
-        Args:
-            response: LiteLLM response object
-            
-        Returns:
-            ChatResponse: Unified Songbird response
         """
         try:
             choice = response.choices[0]
@@ -640,15 +575,8 @@ class LiteLLMAdapter:
     def format_tools_for_provider(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Format tools for this provider with enhanced validation.
-        
         LiteLLM handles tool schema conversion automatically, but we add
         validation and logging for debugging tool calling issues.
-        
-        Args:
-            tools: List of tool schemas in OpenAI format
-            
-        Returns:
-            List[Dict[str, Any]]: Tools ready for LiteLLM
         """
         if not tools:
             return []
@@ -689,24 +617,9 @@ class LiteLLMAdapter:
         return validated_tools  # LiteLLM handles provider-specific conversion
     
     def parse_response_to_unified(self, response: Any) -> ChatResponse:
-        """
-        Parse provider response to unified ChatResponse format.
-        
-        Args:
-            response: Raw provider response
-            
-        Returns:
-            ChatResponse: Unified response format
-        """
         return self._convert_to_songbird_response(response)
     
     def get_supported_features(self) -> Dict[str, bool]:
-        """
-        Get supported features for this provider.
-        
-        Returns:
-            Dict[str, bool]: Feature support mapping
-        """
         return {
             "function_calling": True,  # LiteLLM handles this automatically
             "streaming": True,
@@ -716,7 +629,6 @@ class LiteLLMAdapter:
         }
     
     def _validate_model_compatibility(self):
-        """Validate model compatibility and show warnings for unknown models."""
         try:
             # Check if the model is a known LiteLLM format
             # Special case: Gemini models don't need the gemini/ prefix in LiteLLM
@@ -760,7 +672,6 @@ class LiteLLMAdapter:
                 "openrouter": "OPENROUTER_API_KEY",
                 "together": "TOGETHER_API_KEY",
                 "groq": "GROQ_API_KEY",
-                # Note: ollama doesn't require API keys
             }
             
             env_var = required_env_vars.get(self.vendor_prefix)
@@ -785,7 +696,6 @@ class LiteLLMAdapter:
             logger.debug(f"Environment validation failed (non-critical): {e}")
     
     async def cleanup(self):
-        """Clean up resources to prevent connection leaks."""
         try:
             # Simple cleanup - let LiteLLM handle its own resource management
             logger.debug("LiteLLM adapter cleanup completed")
@@ -793,7 +703,6 @@ class LiteLLMAdapter:
             logger.debug(f"Cleanup failed (non-critical): {e}")
     
     def check_environment_readiness(self) -> Dict[str, Any]:
-        """Check environment readiness and return status information."""
         import os
         
         status = {
@@ -841,7 +750,6 @@ class LiteLLMAdapter:
         return status
     
     def flush_state(self):
-        """Flush any cached state when model changes."""
         try:
             logger.debug(f"Flushing state for model change: {self._last_model} -> {self.model}")
             
@@ -865,12 +773,10 @@ class LiteLLMAdapter:
             logger.error(f"Error flushing state: {e}")
     
     def check_and_flush_if_model_changed(self):
-        """Check if model changed and flush state if needed."""
         if self.model != self._last_model:
             self.flush_state()
     
     def set_model(self, new_model: str):
-        """Set a new model and flush state."""
         old_model = self.model
         self.model = new_model
         
@@ -881,7 +787,6 @@ class LiteLLMAdapter:
             self._validate_model_compatibility()
     
     def set_api_base(self, new_api_base: str):
-        """Set a new API base URL."""
         old_api_base = self.api_base
         self.api_base = new_api_base
         
@@ -896,11 +801,9 @@ class LiteLLMAdapter:
             console.print(f"[dim] API base updated: {new_api_base or 'default'}[/dim]")
     
     def get_api_base(self) -> Optional[str]:
-        """Get the current API base URL."""
         return self.api_base
     
     def get_effective_api_base(self) -> str:
-        """Get the effective API base URL for the current provider."""
         if self.api_base:
             return self.api_base
         
@@ -936,10 +839,6 @@ class LiteLLMAdapter:
             return asyncio.run(self.chat_with_messages(messages, tools))
 
 
-# Note: create_litellm_provider function moved to providers.py to avoid duplication
-# and ensure proper provider_name parameter passing
-
-
 # Convenience function for testing
 async def test_litellm_adapter():
     """Test function for LiteLLM adapter."""
@@ -959,7 +858,6 @@ async def test_litellm_adapter():
         return False
 
 async def test_tool_calling():
-    """Test tool calling functionality with LiteLLM adapter."""
     try:
         console.print("Testing LiteLLM tool calling...")
         
@@ -1007,6 +905,5 @@ async def test_tool_calling():
 
 
 if __name__ == "__main__":
-    # Run test
     import asyncio
     asyncio.run(test_litellm_adapter())

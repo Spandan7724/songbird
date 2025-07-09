@@ -6,6 +6,7 @@ Tests various duplicate scenarios that should be caught by the enhanced similari
 
 import asyncio
 import sys
+import pytest
 from pathlib import Path
 
 # Add the songbird directory to Python path
@@ -15,7 +16,8 @@ from songbird.tools.todo_tools import _calculate_content_similarity, _deduplicat
 from songbird.tools.todo_manager import TodoManager
 
 
-def test_enhanced_similarity():
+@pytest.mark.asyncio
+async def test_enhanced_similarity():
     """Test the enhanced similarity algorithm with real-world duplicate scenarios."""
     
     print("🧪 Testing Enhanced Similarity Algorithm")
@@ -56,7 +58,7 @@ def test_enhanced_similarity():
     ]
     
     for i, (content1, content2, expected_min) in enumerate(test_cases, 1):
-        similarity = _calculate_content_similarity(content1, content2)
+        similarity = await _calculate_content_similarity(content1, content2, None)  # None for semantic_matcher
         status = "✅ PASS" if similarity >= expected_min else "❌ FAIL"
         
         print(f"Test {i}: {status}")
@@ -66,7 +68,8 @@ def test_enhanced_similarity():
         print()
 
 
-def test_input_deduplication():
+@pytest.mark.asyncio
+async def test_input_deduplication():
     """Test the input deduplication function."""
     
     print("🧪 Testing Input Deduplication")
@@ -82,7 +85,7 @@ def test_input_deduplication():
         {"id": "different-task", "content": "Update API documentation", "priority": "low"}
     ]
     
-    deduplicated = _deduplicate_input_todos(input_todos)
+    deduplicated = await _deduplicate_input_todos(input_todos, None)  # None for llm_provider
     
     print(f"Original count: {len(input_todos)}")
     print(f"Deduplicated count: {len(deduplicated)}")
@@ -95,6 +98,7 @@ def test_input_deduplication():
     print()
 
 
+@pytest.mark.asyncio
 async def test_todo_write_integration():
     """Test the full todo_write flow with deduplication."""
     

@@ -40,10 +40,11 @@ class TestFileContextManager:
         import shutil
         shutil.rmtree(self.temp_dir)
 
-    def test_process_message_with_single_file(self):
+    @pytest.mark.asyncio
+    async def test_process_message_with_single_file(self):
         """Test processing message with single file reference."""
         message = "Explain @small.py functionality"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         assert len(contexts) == 1
         ctx = contexts[0]
@@ -58,10 +59,11 @@ class TestFileContextManager:
         assert "print('hello')" in enhanced_message
         assert "User Request: Explain functionality" in enhanced_message
 
-    def test_process_message_with_multiple_files(self):
+    @pytest.mark.asyncio
+    async def test_process_message_with_multiple_files(self):
         """Test processing message with multiple file references."""
         message = "Compare @small.py and @config.json files"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         assert len(contexts) == 2
         
@@ -76,10 +78,11 @@ class TestFileContextManager:
         assert "```python" in enhanced_message
         assert "```json" in enhanced_message
 
-    def test_file_too_large(self):
+    @pytest.mark.asyncio
+    async def test_file_too_large(self):
         """Test handling of files that are too large."""
         message = "Read @large.txt content"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         assert len(contexts) == 1
         ctx = contexts[0]
@@ -93,19 +96,21 @@ class TestFileContextManager:
         assert "=== large.txt ===" in enhanced_message
         assert "Error:" in enhanced_message
 
-    def test_nonexistent_file(self):
+    @pytest.mark.asyncio
+    async def test_nonexistent_file(self):
         """Test handling of non-existent files."""
         message = "Read @missing.py file"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
-        # Should return original message since no valid files
-        assert enhanced_message == "Read file"
+        # Should return original message since no valid files  
+        assert enhanced_message == "Read @missing.py file"
         assert len(contexts) == 0
 
-    def test_subdirectory_file(self):
+    @pytest.mark.asyncio
+    async def test_subdirectory_file(self):
         """Test processing files in subdirectories."""
         message = "Review @src/module.py implementation"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         assert len(contexts) == 1
         ctx = contexts[0]
@@ -114,7 +119,8 @@ class TestFileContextManager:
         assert ctx.line_count == 4
         assert ctx.error is None
 
-    def test_language_hint_detection(self):
+    @pytest.mark.asyncio
+    async def test_language_hint_detection(self):
         """Test language hint detection for different file types."""
         test_cases = [
             ("small.py", "python"),
@@ -123,42 +129,46 @@ class TestFileContextManager:
         
         for filename, expected_lang in test_cases:
             message = f"Check @{filename}"
-            enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+            enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
             
             assert len(contexts) == 1
             assert f"```{expected_lang}" in enhanced_message
 
-    def test_file_summary(self):
+    @pytest.mark.asyncio
+    async def test_file_summary(self):
         """Test file summary generation."""
         message = "Check @small.py and @missing.py files"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         summary = self.manager.get_file_summary(contexts)
         assert "Included 1 file(s)" in summary
         assert "small.py" in summary
         assert "(2 lines total)" in summary
 
-    def test_no_file_references(self):
+    @pytest.mark.asyncio
+    async def test_no_file_references(self):
         """Test processing message with no file references."""
         message = "This is a regular message"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         assert enhanced_message == message  # Should be unchanged
         assert len(contexts) == 0
 
-    def test_convenience_function(self):
+    @pytest.mark.asyncio
+    async def test_convenience_function(self):
         """Test convenience function."""
         message = "Read @small.py file"
-        enhanced_message, contexts = process_file_references(message, str(self.temp_path))
+        enhanced_message, contexts = await process_file_references(message, str(self.temp_path))
         
         assert len(contexts) == 1
         assert contexts[0].relative_path == "small.py"
         assert "print('hello')" in contexts[0].content
 
-    def test_file_context_metadata(self):
+    @pytest.mark.asyncio
+    async def test_file_context_metadata(self):
         """Test file context metadata calculation."""
         message = "Read @config.json"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         assert len(contexts) == 1
         ctx = contexts[0]
@@ -168,25 +178,27 @@ class TestFileContextManager:
         assert ctx.size_bytes > 0
         assert ctx.size_bytes == len('{\n  "key": "value",\n  "number": 42\n}')
 
-    def test_quoted_filename_handling(self):
+    @pytest.mark.asyncio
+    async def test_quoted_filename_handling(self):
         """Test handling of quoted filenames."""
         # Create file with spaces
         (self.temp_path / "file with spaces.txt").write_text("content")
         
         message = 'Read @"file with spaces.txt" content'
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         assert len(contexts) == 1
         ctx = contexts[0]
         assert ctx.relative_path == "file with spaces.txt"
         assert ctx.content == "content"
 
-    def test_empty_file_handling(self):
+    @pytest.mark.asyncio
+    async def test_empty_file_handling(self):
         """Test handling of empty files."""
         (self.temp_path / "empty.txt").write_text("")
         
         message = "Read @empty.txt"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         assert len(contexts) == 1
         ctx = contexts[0]
@@ -195,16 +207,18 @@ class TestFileContextManager:
         assert ctx.line_count == 0
         assert ctx.error is None
 
-    def test_security_path_traversal(self):
+    @pytest.mark.asyncio
+    async def test_security_path_traversal(self):
         """Test security - path traversal should be handled by parser."""
         message = "Read @../../../etc/passwd"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         # Parser should reject this, so no contexts returned
         assert len(contexts) == 0
-        assert enhanced_message == "Read"
+        assert enhanced_message == "Read @../../../etc/passwd"
 
-    def test_file_read_error_handling(self):
+    @pytest.mark.asyncio
+    async def test_file_read_error_handling(self):
         """Test handling of file read errors."""
         # Create a file and then make it unreadable (if possible)
         test_file = self.temp_path / "protected.txt"
@@ -215,7 +229,7 @@ class TestFileContextManager:
             os.chmod(test_file, 0o000)
             
             message = "Read @protected.txt"
-            enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+            enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
             
             # Should handle the permission error gracefully
             if len(contexts) == 1:
@@ -230,10 +244,11 @@ class TestFileContextManager:
             except:
                 pass
 
-    def test_mixed_valid_invalid_files(self):
+    @pytest.mark.asyncio
+    async def test_mixed_valid_invalid_files(self):
         """Test processing mix of valid and invalid file references."""
         message = "Check @small.py, @missing.py, and @config.json"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         # Should only include valid files
         assert len(contexts) == 2
@@ -242,13 +257,14 @@ class TestFileContextManager:
         assert "config.json" in file_paths
         assert all(ctx.error is None for ctx in contexts)
 
-    def test_language_hint_edge_cases(self):
+    @pytest.mark.asyncio
+    async def test_language_hint_edge_cases(self):
         """Test language hint detection for edge cases."""
-        # Test unknown extension
-        (self.temp_path / "unknown.xyz").write_text("unknown content")
+        # Test unknown extension - use underscores to avoid domain detection
+        (self.temp_path / "unknown_file.xyz").write_text("unknown content")
         
-        message = "Check @unknown.xyz"
-        enhanced_message, contexts = self.manager.process_message_with_file_context(message)
+        message = "Check @unknown_file.xyz"
+        enhanced_message, contexts = await self.manager.process_message_with_file_context(message)
         
         assert len(contexts) == 1
         # Should use empty language hint for unknown extensions

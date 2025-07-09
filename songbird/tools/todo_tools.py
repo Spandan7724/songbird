@@ -22,11 +22,13 @@ def _get_semantic_matcher(llm_provider=None) -> Optional[SemanticMatcher]:
 async def todo_read(
     session_id: Optional[str] = None,
     status: Optional[str] = None,
-    show_completed: bool = False
+    show_completed: bool = False,
+    llm_provider=None
 ) -> Dict[str, Any]:
 
     try:
-        todo_manager = TodoManager(session_id=session_id)
+        semantic_matcher = _get_semantic_matcher(llm_provider)
+        todo_manager = TodoManager(session_id=session_id, semantic_matcher=semantic_matcher)
         
         if session_id:
             todos = todo_manager.get_todos(session_id=session_id)
@@ -98,8 +100,9 @@ async def todo_write(
 ) -> Dict[str, Any]:
 
     try:
-        # Initialize todo manager
-        todo_manager = TodoManager(session_id=session_id)
+        # Initialize todo manager with semantic matcher
+        semantic_matcher = _get_semantic_matcher(llm_provider)
+        todo_manager = TodoManager(session_id=session_id, semantic_matcher=semantic_matcher)
         
         created_count = 0
         updated_count = 0
@@ -151,7 +154,7 @@ async def todo_write(
                         if status == "completed" and existing_todo.status != "completed":
                             completed_count += 1
                     else:
-                        new_todo = todo_manager.add_todo(content, priority)
+                        new_todo = await todo_manager.add_todo(content, priority)
                         if status != "pending":
                             todo_manager.update_todo(new_todo.id, status=status)
                         created_count += 1
@@ -162,10 +165,10 @@ async def todo_write(
                     existing_todos = todo_manager.get_current_session_todos()
                     matching_todo = None
                     
-                    normalized_content = _normalize_todo_content(content)
+                    normalized_content = _normalize_todo_content(content, semantic_matcher)
                     
                     for existing in existing_todos:
-                        normalized_existing = _normalize_todo_content(existing.content)
+                        normalized_existing = _normalize_todo_content(existing.content, semantic_matcher)
                         if normalized_existing == normalized_content:
                             matching_todo = existing
                             break
@@ -180,9 +183,9 @@ async def todo_write(
                                 try:
                                     similarity = await semantic_matcher.calculate_semantic_similarity(content, existing.content)
                                 except Exception:
-                                    similarity = _calculate_content_similarity(content, existing.content)
+                                    similarity = await _calculate_content_similarity(content, existing.content, semantic_matcher)
                             else:
-                                similarity = _calculate_content_similarity(content, existing.content)
+                                similarity = await _calculate_content_similarity(content, existing.content, semantic_matcher)
                             
                             config = get_semantic_config()
                             if similarity > config.similarity_threshold and similarity > best_similarity:
@@ -203,7 +206,7 @@ async def todo_write(
                         if status == "completed" and matching_todo.status != "completed":
                             completed_count += 1
                     else:
-                        new_todo = todo_manager.add_todo(content, priority)
+                        new_todo = await todo_manager.add_todo(content, priority)
                         if status != "pending":
                             todo_manager.update_todo(new_todo.id, status=status)
                         created_count += 1
@@ -216,7 +219,7 @@ async def todo_write(
         
         current_todos = todo_manager.get_current_session_todos()
         
-        display_todos = _deduplicate_todos(current_todos)
+        display_todos = await _deduplicate_todos(current_todos, semantic_matcher)
         
         if display_todos:
             display_todos_table(display_todos, title="Updated Task List")
@@ -263,9 +266,10 @@ async def todo_write(
         }
 
 
-def extract_todos_from_text(text: str) -> List[str]:
-    todo_manager = TodoManager()
-    return todo_manager.generate_smart_todos(text)
+async def extract_todos_from_text(text: str, llm_provider=None) -> List[str]:
+    semantic_matcher = _get_semantic_matcher(llm_provider)
+    todo_manager = TodoManager(semantic_matcher=semantic_matcher)
+    return await todo_manager.generate_smart_todos(text)
 
 
 async def llm_auto_complete_todos(message: str, session_id: Optional[str] = None, llm_provider=None) -> List[str]:
@@ -279,7 +283,8 @@ async def llm_auto_complete_todos(message: str, session_id: Optional[str] = None
     completed_ids = []
     
     try:
-        todo_manager = TodoManager(session_id=session_id)
+        semantic_matcher = _get_semantic_matcher(llm_provider)
+        todo_manager = TodoManager(session_id=session_id, semantic_matcher=semantic_matcher)
         active_todos = (
             todo_manager.get_todos(status="in_progress") + 
             todo_manager.get_todos(status="pending")
@@ -350,30 +355,51 @@ If no todos are completed, return: []
     return completed_ids
 
 
-async def fallback_auto_complete_todos(message: str, session_id: Optional[str] = None) -> List[str]:
+async def fallback_auto_complete_todos(message: str, session_id: Optional[str] = None, llm_provider=None) -> List[str]:
     completed_ids = []
     
     try:
-        todo_manager = TodoManager(session_id=session_id)
+        semantic_matcher = _get_semantic_matcher(llm_provider)
+        todo_manager = TodoManager(session_id=session_id, semantic_matcher=semantic_matcher)
         active_todos = (
             todo_manager.get_todos(status="in_progress") + 
             todo_manager.get_todos(status="pending")
         )
         
-        completion_keywords = [
-            "done", "finished", "completed", "fixed", "implemented", 
-            "resolved", "working", "solved"
-        ]
-        
-        message_lower = message.lower()
-        has_completion_keyword = any(keyword in message_lower for keyword in completion_keywords)
-        
-        if has_completion_keyword:
-            for todo in active_todos:
-                todo_content_lower = todo.content.lower()
-                if todo_content_lower in message_lower:
-                    todo_manager.complete_todo(todo.id)
-                    completed_ids.append(todo.id)
+        # Use SemanticMatcher for completion detection with fallback
+        if semantic_matcher:
+            try:
+                todo_contents = [todo.content for todo in active_todos]
+                completed_contents = await semantic_matcher.detect_completion_signals(message, todo_contents)
+                
+                # Match completed contents back to todo IDs
+                for completed_content in completed_contents:
+                    for todo in active_todos:
+                        if todo.content == completed_content:
+                            todo_manager.complete_todo(todo.id)
+                            completed_ids.append(todo.id)
+                            break
+            except Exception:
+                # Fall back to semantic matcher's fallback method
+                todo_contents = [todo.content for todo in active_todos]
+                completed_contents = semantic_matcher._fallback_detect_completion(message, todo_contents)
+                for completed_content in completed_contents:
+                    for todo in active_todos:
+                        if todo.content == completed_content:
+                            todo_manager.complete_todo(todo.id)
+                            completed_ids.append(todo.id)
+                            break
+        else:
+            # Use semantic matcher fallback method directly
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            todo_contents = [todo.content for todo in active_todos]
+            completed_contents = temp_matcher._fallback_detect_completion(message, todo_contents)
+            for completed_content in completed_contents:
+                for todo in active_todos:
+                    if todo.content == completed_content:
+                        todo_manager.complete_todo(todo.id)
+                        completed_ids.append(todo.id)
+                        break
         
     except Exception:
         pass
@@ -381,131 +407,32 @@ async def fallback_auto_complete_todos(message: str, session_id: Optional[str] =
     return completed_ids
 
 
-def _normalize_todo_content(content: str) -> str:
-    import re
-    
-    normalized = content.lower().strip()
-    
-    prefixes_to_remove = [
-        'todo:', 'task:', 'step:', 'action:', 'next:', 'now:', 'please',
-        'need to', 'should', 'must', 'will', 'going to', 'plan to'
-    ]
-    
-    for prefix in prefixes_to_remove:
-        if normalized.startswith(prefix):
-            normalized = normalized[len(prefix):].strip()
-    
-
-    normalized = re.sub(r'[^\w\s]', ' ', normalized)  # Replace punctuation with spaces
-    normalized = re.sub(r'\s+', ' ', normalized)  # Collapse multiple spaces
-    normalized = normalized.strip()
-    
-    return normalized
-
-
-def _calculate_content_similarity(content1: str, content2: str) -> float:
-    norm1 = _normalize_todo_content(content1)
-    norm2 = _normalize_todo_content(content2)
-    
-    if norm1 == norm2:
-        return 1.0
-    
-    words1 = set(norm1.split())
-    words2 = set(norm2.split())
-    
-    if not words1 or not words2:
-        return 0.0
-    
-    # Enhanced similarity with concept-based matching
-    similarity_score = 0.0
-    
-    # 1. Direct word intersection (Jaccard similarity)
-    intersection = words1.intersection(words2)
-    union = words1.union(words2)
-    jaccard_similarity = len(intersection) / len(union)
-    
-    # 2. Subset similarity (one is subset of the other)
-    subset_similarity = len(intersection) / min(len(words1), len(words2))
-    
-    # 3. Concept-based similarity for programming tasks
-    concept_similarity = _calculate_concept_similarity(words1, words2)
-    
-    # 4. Action verb similarity (same action, different objects)
-    action_similarity = _calculate_action_similarity(norm1, norm2)
-    
-    # Combine all similarity measures with weights
-    similarity_score = max(
-        jaccard_similarity * 0.3 + concept_similarity * 0.4 + action_similarity * 0.3,
-        subset_similarity * 0.7 + concept_similarity * 0.3,
-        concept_similarity * 0.9,  # Pure concept match can be strong indicator
-        action_similarity * 0.8 if action_similarity > 0.6 else 0.0  # Strong action match
-    )
-    
-    return min(similarity_score, 1.0)  # Cap at 1.0
-
-
-def _calculate_concept_similarity(words1: set, words2: set) -> float:
-
-    # Define concept groups for programming tasks
-    concept_groups = {
-        'analysis': {'analyze', 'examine', 'review', 'investigate', 'study', 'inspect', 'assess', 'evaluate'},
-        'implementation': {'implement', 'create', 'build', 'develop', 'code', 'write', 'add', 'construct'},
-        'modification': {'refactor', 'update', 'modify', 'change', 'edit', 'improve', 'enhance', 'optimize'},
-        'testing': {'test', 'validate', 'verify', 'check', 'ensure', 'confirm', 'qa'},
-        'documentation': {'document', 'docs', 'documentation', 'comment', 'readme', 'wiki'},
-        'debugging': {'fix', 'debug', 'resolve', 'solve', 'repair', 'troubleshoot', 'handle', 'address'},
-        'structure': {'structure', 'architecture', 'design', 'layout', 'organization', 'framework'},
-        'performance': {'performance', 'optimize', 'speed', 'efficiency', 'bottleneck', 'latency'},
-        'codebase': {'codebase', 'code', 'project', 'application', 'system', 'repo', 'repository'},
-        'maintenance': {'maintain', 'maintainability', 'cleanup', 'clean', 'organize', 'manage'}
-    }
-    
-    # Find concept matches
-    concept_matches = 0
-    total_concepts = 0
-    
-    for concept_name, concept_words in concept_groups.items():
-        words1_in_concept = len(words1.intersection(concept_words))
-        words2_in_concept = len(words2.intersection(concept_words))
-        
-        if words1_in_concept > 0 or words2_in_concept > 0:
-            total_concepts += 1
-            if words1_in_concept > 0 and words2_in_concept > 0:
-                concept_matches += 1
-    
-    if total_concepts == 0:
-        return 0.0
-    
-    return concept_matches / total_concepts
-
-
-def _calculate_action_similarity(text1: str, text2: str) -> float:
-
-    action_groups = {
-        'create': {'create', 'add', 'build', 'implement', 'develop', 'write', 'establish'},
-        'modify': {'update', 'modify', 'change', 'edit', 'refactor', 'improve', 'enhance'},
-        'analyze': {'analyze', 'examine', 'review', 'investigate', 'study', 'assess'},
-        'fix': {'fix', 'debug', 'resolve', 'solve', 'repair', 'address', 'handle'},
-        'test': {'test', 'validate', 'verify', 'check', 'ensure'},
-        'remove': {'remove', 'delete', 'clean', 'cleanup', 'clear'}
-    }
-    
-    def extract_action_group(text):
-        words = text.lower().split()
-        for group_name, group_verbs in action_groups.items():
-            if any(verb in text.lower() for verb in group_verbs):
-                return group_name
-        return None
-    
-    action1 = extract_action_group(text1)
-    action2 = extract_action_group(text2)
-    
-    if action1 and action2 and action1 == action2:
-        return 0.8  # High similarity for same action type
-    elif action1 and action2:
-        return 0.2  # Some similarity for different actions
+def _normalize_todo_content(content: str, semantic_matcher: Optional[SemanticMatcher] = None) -> str:
+    """Normalize todo content using SemanticMatcher with fallback."""
+    if semantic_matcher:
+        return semantic_matcher._fallback_normalize_content(content)
     else:
-        return 0.0  # No clear action detected
+        # Use temporary semantic matcher for fallback behavior only
+        temp_matcher = SemanticMatcher(llm_provider=None)
+        return temp_matcher._fallback_normalize_content(content)
+
+
+async def _calculate_content_similarity(content1: str, content2: str, semantic_matcher: Optional[SemanticMatcher] = None) -> float:
+    """Calculate content similarity using SemanticMatcher with fallback to heuristics."""
+    if semantic_matcher:
+        try:
+            return await semantic_matcher.calculate_semantic_similarity(content1, content2)
+        except Exception:
+            # Fall back to semantic matcher's fallback method
+            return semantic_matcher._fallback_similarity(content1, content2)
+    else:
+        # Use temporary semantic matcher for fallback behavior only
+        temp_matcher = SemanticMatcher(llm_provider=None)
+        return temp_matcher._fallback_similarity(content1, content2)
+
+
+# Hardcoded concept and action similarity functions removed - 
+# now handled by SemanticMatcher centrally
 
 
 async def _deduplicate_input_todos(input_todos: List[Dict[str, Any]], llm_provider=None) -> List[Dict[str, Any]]:
@@ -530,9 +457,9 @@ async def _deduplicate_input_todos(input_todos: List[Dict[str, Any]], llm_provid
                 try:
                     similarity = await semantic_matcher.calculate_semantic_similarity(content, seen_content)
                 except Exception:
-                    similarity = _calculate_content_similarity(content, seen_content)
+                    similarity = await _calculate_content_similarity(content, seen_content, semantic_matcher)
             else:
-                similarity = _calculate_content_similarity(content, seen_content)
+                similarity = await _calculate_content_similarity(content, seen_content, semantic_matcher)
             
             config = get_semantic_config()
             if similarity > config.input_dedup_threshold:
@@ -546,7 +473,7 @@ async def _deduplicate_input_todos(input_todos: List[Dict[str, Any]], llm_provid
     return unique_todos
 
 
-def _deduplicate_todos(todos: List) -> List:
+async def _deduplicate_todos(todos: List, semantic_matcher: Optional[SemanticMatcher] = None) -> List:
 
     if not todos:
         return todos
@@ -555,12 +482,12 @@ def _deduplicate_todos(todos: List) -> List:
     content_groups = {}
     
     for todo in todos:
-        normalized = _normalize_todo_content(todo.content)
+        normalized = _normalize_todo_content(todo.content, semantic_matcher)
         
         # Find if this content matches any existing group
         matched_group = None
         for existing_normalized in content_groups.keys():
-            if _calculate_content_similarity(normalized, existing_normalized) > 0.85:
+            if await _calculate_content_similarity(normalized, existing_normalized, semantic_matcher) > 0.85:
                 matched_group = existing_normalized
                 break
         

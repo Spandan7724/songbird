@@ -14,9 +14,7 @@ logger = logging.getLogger(__name__)
 class EventLoopManager:
     """
     Manages asyncio event loop lifecycle to prevent cleanup errors during shutdown.
-    
     This manager ensures that event loops are properly closed before Python interpreter
-    shutdown, preventing "Invalid file descriptor" errors in BaseEventLoop.__del__.
     """
     
     _instance: Optional['EventLoopManager'] = None
@@ -35,7 +33,6 @@ class EventLoopManager:
         """Initialize the event loop manager."""
         if not hasattr(self, '_initialized'):
             self._initialized = True
-            # Register cleanup handler only once
             if not EventLoopManager._cleanup_registered:
                 atexit.register(self._cleanup_on_exit)
                 EventLoopManager._cleanup_registered = True
@@ -43,9 +40,6 @@ class EventLoopManager:
     def register_loop(self, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
         """
         Register an event loop for cleanup tracking.
-        
-        Args:
-            loop: Event loop to register. If None, uses current loop.
         """
         with EventLoopManager._lock:
             if loop is None:
@@ -60,7 +54,6 @@ class EventLoopManager:
             if loop:
                 EventLoopManager._current_loop = loop
                 
-                # Track this loop with weak reference
                 def cleanup_callback(ref):
                     EventLoopManager._tracked_loops.discard(ref)
                 
@@ -72,20 +65,14 @@ class EventLoopManager:
     def close_loop_safely(self, loop: asyncio.AbstractEventLoop) -> None:
         """
         Safely close an event loop with proper error handling.
-        
-        Args:
-            loop: Event loop to close
         """
         try:
             if loop and not loop.is_closed():
                 logger.debug(f"Closing event loop: {id(loop)}")
                 
-                # Cancel all running tasks
                 if hasattr(loop, 'all_tasks'):
-                    # Python 3.7+
                     pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
                 else:
-                    # Fallback for older versions
                     pending_tasks = [task for task in asyncio.Task.all_tasks(loop) if not task.done()]
                 
                 if pending_tasks:
@@ -171,30 +158,16 @@ def register_current_loop() -> None:
 
 
 def ensure_clean_shutdown() -> None:
-    """
-    Convenience function to ensure clean shutdown.
-    Call this at the end of your main async function.
-    """
     EventLoopManager.ensure_clean_shutdown()
 
 
 def close_all_loops() -> None:
-    """
-    Convenience function to close all tracked event loops.
-    """
     event_loop_manager.cleanup_all_loops()
 
 
-# Context manager for safe event loop usage
 class ManagedEventLoop:
     """
     Context manager for safe event loop usage with automatic cleanup.
-    
-    Usage:
-        async def main():
-            async with ManagedEventLoop():
-                # Your async code here
-                pass
     """
     
     def __init__(self):
@@ -218,7 +191,6 @@ class ManagedEventLoop:
             pass
 
 
-# Decorator for main async functions
 def managed_async_main(func):
     """
     Decorator to ensure proper event loop cleanup for main async functions.

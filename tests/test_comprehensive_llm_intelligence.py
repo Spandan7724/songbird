@@ -7,6 +7,7 @@ Tests real-world scenarios, edge cases, and integration with actual todo system.
 import asyncio
 import sys
 import json
+import pytest
 from pathlib import Path
 
 # Add the songbird directory to Python path
@@ -305,6 +306,7 @@ class MockResponse:
         self.content = content
 
 
+@pytest.mark.asyncio
 async def test_message_classification_comprehensive():
     """Comprehensive test of message classification with realistic scenarios."""
     print("🧪 Comprehensive Message Classification Test")
@@ -431,6 +433,7 @@ async def test_message_classification_comprehensive():
     return passed == total
 
 
+@pytest.mark.asyncio
 async def test_semantic_similarity_comprehensive():
     """Comprehensive test of semantic similarity matching."""
     print("\n🧪 Comprehensive Semantic Similarity Test")
@@ -540,6 +543,7 @@ async def test_semantic_similarity_comprehensive():
     return passed == total
 
 
+@pytest.mark.asyncio
 async def test_priority_analysis():
     """Test intelligent priority analysis."""
     print("\n🧪 Priority Analysis Test")
@@ -590,6 +594,7 @@ async def test_priority_analysis():
     return passed == total
 
 
+@pytest.mark.asyncio
 async def test_todo_integration():
     """Test integration with actual todo system."""
     print("\n🧪 Todo System Integration Test")
@@ -674,6 +679,7 @@ async def test_todo_integration():
             print(f"⚠️  Warning: Could not clean up test data: {e}")
 
 
+@pytest.mark.asyncio
 async def test_configuration_system():
     """Test the configuration system thoroughly."""
     print("\n🧪 Configuration System Test")
@@ -733,6 +739,7 @@ async def test_configuration_system():
     return True
 
 
+@pytest.mark.asyncio
 async def test_performance_and_caching():
     """Test performance characteristics and caching behavior."""
     print("\n🧪 Performance and Caching Test")

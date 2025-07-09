@@ -1,6 +1,3 @@
-# songbird/llm/http_session_manager.py
-"""HTTP session manager for proper httpx session lifecycle management."""
-
 import asyncio
 import logging
 import httpx
@@ -12,9 +9,6 @@ logger = logging.getLogger(__name__)
 class HTTPSessionManager:
     """
     Singleton HTTP session manager that ensures proper cleanup of httpx sessions.
-    
-    This manager creates a single httpx.AsyncClient that can be reused across
-    all LiteLLM calls, preventing resource leaks and unclosed session warnings.
     """
     
     _instance: Optional['HTTPSessionManager'] = None
@@ -23,25 +17,18 @@ class HTTPSessionManager:
     _cleanup_registered = False
     
     def __new__(cls) -> 'HTTPSessionManager':
-        """Ensure singleton pattern."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
     
     def __init__(self):
-        """Initialize the session manager."""
         if not hasattr(self, '_initialized'):
             self._initialized = True
-            # Skip atexit registration for httpx sessions since we handle cleanup explicitly
-            # The aiohttp session manager handles the atexit cleanup comprehensively
             HTTPSessionManager._cleanup_registered = True
     
     async def get_session(self) -> httpx.AsyncClient:
         """
         Get or create the singleton HTTP session.
-        
-        Returns:
-            httpx.AsyncClient: Configured HTTP session
         """
         async with HTTPSessionManager._lock:
             if HTTPSessionManager._session is None or HTTPSessionManager._session.is_closed:
@@ -73,9 +60,6 @@ class HTTPSessionManager:
             return HTTPSessionManager._session
     
     async def close_session(self) -> None:
-        """
-        Close the HTTP session if it exists.
-        """
         async with HTTPSessionManager._lock:
             if HTTPSessionManager._session and not HTTPSessionManager._session.is_closed:
                 logger.debug(f"Closing HTTP session: {id(HTTPSessionManager._session)}")
@@ -112,20 +96,11 @@ class HTTPSessionManager:
             pass
     
     async def health_check(self) -> bool:
-        """
-        Check if the current session is healthy.
-        
-        Returns:
-            bool: True if session exists and is not closed
-        """
         async with HTTPSessionManager._lock:
             return (HTTPSessionManager._session is not None and 
                    not HTTPSessionManager._session.is_closed)
     
     async def reset_session(self) -> None:
-        """
-        Force reset the session (close current and create new on next get).
-        """
         await self.close_session()
         logger.debug("HTTP session reset completed")
 
@@ -135,17 +110,8 @@ session_manager = HTTPSessionManager()
 
 
 async def get_managed_session() -> httpx.AsyncClient:
-    """
-    Convenience function to get the managed HTTP session.
-    
-    Returns:
-        httpx.AsyncClient: The singleton managed session
-    """
     return await session_manager.get_session()
 
 
 async def close_managed_session() -> None:
-    """
-    Convenience function to close the managed HTTP session.
-    """
     await session_manager.close_session()

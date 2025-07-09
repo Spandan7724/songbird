@@ -18,11 +18,9 @@ console = Console()
 
 
 class BaseProvider(ABC):
-    """Base class for all LLM providers."""
     
     @abstractmethod
     def chat(self, message: str, tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
-        """Send a chat message and return the response."""
         pass
     
     @abstractmethod
@@ -33,7 +31,6 @@ class BaseProvider(ABC):
 
 # LiteLLM unified provider functions
 def create_litellm_provider(provider_name: str, model: str = None, api_base: str = None, **kwargs):
-    """Create a LiteLLM provider instance."""
     if not LITELLM_AVAILABLE:
         raise ImportError("LiteLLM is not installed. Install with: pip install litellm")
     
@@ -60,7 +57,6 @@ def create_litellm_provider(provider_name: str, model: str = None, api_base: str
 
 
 def get_copilot_provider(model: str = None, quiet: bool = False, **kwargs):
-    """Create a custom GitHub Copilot provider instance."""
     if not model:
         model = "gpt-4o"  # Default model for Copilot
     
@@ -76,7 +72,6 @@ def get_copilot_provider(model: str = None, quiet: bool = False, **kwargs):
 
 
 def get_litellm_provider(provider_name: str, model: str = None, api_base: str = None, **kwargs):
-    """Get a LiteLLM provider with special handling for Copilot and fallback to legacy providers."""
     # Special handling for GitHub Copilot
     if provider_name == "copilot":
         return get_copilot_provider(model, **kwargs)
@@ -91,13 +86,10 @@ def get_litellm_provider(provider_name: str, model: str = None, api_base: str = 
 
 
 def get_provider(name: str, use_litellm: bool = True) -> BaseProvider:
-    """Get a provider instance by name."""
-    # Always use LiteLLM since legacy providers have been removed
     return get_litellm_provider(name)
 
 
 def get_default_provider_name():
-    """Get the default provider name based on available API keys and configuration."""
     try:
         from ..config.config_manager import get_config_manager
         
@@ -161,18 +153,15 @@ def get_default_provider_name():
 
 
 def get_default_provider():
-    """Get the default provider instance based on available API keys and configuration."""
     provider_name = get_default_provider_name()
     return get_litellm_provider(provider_name)
 
 
 def list_available_providers() -> List[str]:
-    """Get list of available provider names."""
     return ["openai", "claude", "gemini", "ollama", "openrouter"]
 
 
 def list_ready_providers() -> List[str]:
-    """Get list of providers that are ready to use (with API keys configured)."""
     ready_providers = []
     
     # Check each provider for API key availability
@@ -196,7 +185,6 @@ def list_ready_providers() -> List[str]:
 
 
 def get_provider_info(use_discovery: bool = True, quiet: bool = False) -> Dict[str, Dict[str, Any]]:
-    """Get information about all available providers with dynamic model discovery."""
     provider_info = {}
     
     # Static provider configuration
@@ -292,7 +280,6 @@ def get_provider_info(use_discovery: bool = True, quiet: bool = False) -> Dict[s
 
 
 async def get_models_for_provider(provider_name: str, use_cache: bool = True) -> List[str]:
-    """Get available models for a specific provider using dynamic discovery."""
     try:
         from ..discovery import get_discovery_service
         

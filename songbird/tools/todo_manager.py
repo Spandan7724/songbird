@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from rich.console import Console
+from .semantic_matcher import SemanticMatcher
 
 console = Console()
 
@@ -62,9 +63,11 @@ class TodoItem:
 class TodoManager:
     # Manages todos for Songbird sessions
     
-    def __init__(self, working_directory: str = ".", session_id: Optional[str] = None):
+    def __init__(self, working_directory: str = ".", session_id: Optional[str] = None, 
+                 semantic_matcher: Optional[SemanticMatcher] = None):
         self.working_directory = Path(working_directory).resolve()
         self.session_id = session_id
+        self.semantic_matcher = semantic_matcher
         self.storage_path = self._get_storage_path()
         self._todos: List[TodoItem] = []
         self._load_todos()
@@ -160,10 +163,10 @@ class TodoManager:
         except Exception as e:
             console.print(f"[red]Error saving todos: {e}[/red]")
     
-    def add_todo(self, content: str, priority: str = "medium", use_semantic_id: bool = True) -> TodoItem:
+    async def add_todo(self, content: str, priority: str = "medium", use_semantic_id: bool = True) -> TodoItem:
 
         if use_semantic_id:
-            semantic_id = self.generate_semantic_id(content)
+            semantic_id = await self.generate_semantic_id(content)
         else:
             semantic_id = None
         
@@ -227,50 +230,40 @@ class TodoManager:
                 return todo
         return None
     
-    def smart_prioritize(self, content: str) -> str:
-        content_lower = content.lower()
-        high_priority_keywords = [
-            "urgent", "critical", "important", "fix", "bug", "error", 
-            "broken", "failing", "security", "deploy", "release"
-        ]
-        
-        low_priority_keywords = [
-            "cleanup", "refactor", "documentation", "docs", "comment",
-            "optimize", "improve", "enhance", "consider", "maybe"
-        ]
-        
-        for keyword in high_priority_keywords:
-            if keyword in content_lower:
-                return "high"
-        
-        for keyword in low_priority_keywords:
-            if keyword in content_lower:
-                return "low"
-        
-        return "medium"
+    async def smart_prioritize(self, content: str) -> str:
+        """Smart priority detection using SemanticMatcher with fallback."""
+        if self.semantic_matcher:
+            try:
+                return await self.semantic_matcher.analyze_todo_priority(content)
+            except Exception:
+                # Fall back to semantic matcher's fallback method
+                return self.semantic_matcher._fallback_priority(content)
+        else:
+            # Create a temporary semantic matcher for fallback behavior only
+            from .semantic_matcher import SemanticMatcher
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            return temp_matcher._fallback_priority(content)
     
-    def generate_semantic_id(self, content: str) -> str:
+    async def generate_semantic_id(self, content: str) -> str:
+        """Generate semantic ID using SemanticMatcher with fallback."""
         import re
         
-        content_lower = content.lower().strip()
-        
-        action_verbs = [
-            'implement', 'create', 'add', 'build', 'develop', 'write',
-            'fix', 'debug', 'resolve', 'solve', 'repair',
-            'update', 'modify', 'change', 'edit', 'refactor',
-            'test', 'validate', 'verify', 'check',
-            'remove', 'delete', 'clean', 'cleanup',
-            'analyze', 'research', 'investigate', 'explore',
-            'design', 'plan', 'configure', 'setup'
-        ]
-        
+        # Extract action using SemanticMatcher
         action = None
-        for verb in action_verbs:
-            if verb in content_lower:
-                action = verb
-                break
+        if self.semantic_matcher:
+            try:
+                action = await self.semantic_matcher.extract_primary_action(content)
+            except Exception:
+                action = self.semantic_matcher._fallback_extract_action(content)
+        else:
+            # Create temporary semantic matcher for fallback behavior only
+            from .semantic_matcher import SemanticMatcher
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            action = temp_matcher._fallback_extract_action(content)
         
+        # Fallback if no action found
         if not action:
+            content_lower = content.lower()
             if any(word in content_lower for word in ['bug', 'error', 'issue', 'problem']):
                 action = 'fix'
             elif any(word in content_lower for word in ['new', 'add']):
@@ -280,22 +273,40 @@ class TodoManager:
             else:
                 action = 'task'
         
-        stop_words = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
-            'before', 'after', 'above', 'below', 'between', 'this', 'that', 'these',
-            'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves'
-        }
-        clean_content = re.sub(r'[^\w\s-]', ' ', content_lower)
+        # Normalize content using SemanticMatcher
+        normalized_content = content
+        if self.semantic_matcher:
+            try:
+                normalized_content = await self.semantic_matcher.normalize_todo_content(content)
+            except Exception:
+                normalized_content = self.semantic_matcher._fallback_normalize_content(content)
+        else:
+            from .semantic_matcher import SemanticMatcher
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            normalized_content = temp_matcher._fallback_normalize_content(content)
+        
+        # Extract meaningful words from normalized content
+        clean_content = re.sub(r'[^\w\s-]', ' ', normalized_content.lower())
         words = clean_content.split()
         
+        # Get stop words from semantic matcher
+        stop_words = set()
+        if self.semantic_matcher:
+            stop_words = self.semantic_matcher._fallback_keywords['stop_words']
+        else:
+            from .semantic_matcher import SemanticMatcher
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            stop_words = temp_matcher._fallback_keywords['stop_words']
+        
+        # Filter meaningful words
         meaningful_words = [
             word for word in words 
-            if word not in stop_words and word not in action_verbs and len(word) > 2
+            if word not in stop_words and len(word) > 2 and word != action
         ]
         
         subject_words = meaningful_words[:3]
         
+        # Build semantic ID
         if subject_words:
             semantic_id = f"{action}-{'-'.join(subject_words)}"
         else:
@@ -305,6 +316,7 @@ class TodoManager:
             else:
                 semantic_id = f"{action}-task"
         
+        # Clean and format ID
         semantic_id = re.sub(r'[^a-z0-9-]', '-', semantic_id)
         semantic_id = re.sub(r'-+', '-', semantic_id)
         semantic_id = semantic_id.strip('-')
@@ -325,24 +337,76 @@ class TodoManager:
         import uuid
         return str(uuid.uuid4())
     
-    def generate_smart_todos(self, user_message: str) -> List[str]:
+    async def generate_smart_todos(self, user_message: str) -> List[str]:
+        """Generate smart todo suggestions using SemanticMatcher with pattern fallback."""
         suggestions = []
+        
+        # First, try to use LLM for smart todo generation if available
+        if self.semantic_matcher and self.semantic_matcher.llm_provider:
+            try:
+                # Use LLM to extract actionable tasks from the message
+                prompt = f"""
+Extract actionable todo items from this user message:
+
+Message: "{user_message}"
+
+Look for:
+- Explicit todo statements (need to, should, must, have to)
+- Action items (implement, create, add, fix, update, etc.)
+- Issues mentioned that need addressing
+- Features or improvements suggested
+
+Return 1-3 clear, actionable todo items. Respond with ONLY a JSON object:
+{{
+  "todos": ["actionable todo 1", "actionable todo 2", "actionable todo 3"],
+  "reasoning": "brief explanation"
+}}
+
+If no clear todos are found, use "todos": []
+"""
+                messages = [{"role": "user", "content": prompt}]
+                response = await self.semantic_matcher.llm_provider.chat_with_messages(messages)
+                
+                if response.content:
+                    try:
+                        import json
+                        import re
+                        json_match = re.search(r'\{.*?\}', response.content, re.DOTALL)
+                        if json_match:
+                            data = json.loads(json_match.group(0))
+                            llm_todos = data.get('todos', [])
+                            if isinstance(llm_todos, list) and llm_todos:
+                                return llm_todos[:3]
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+            except Exception:
+                pass  # Fall back to pattern matching
+        
+        # Fallback: Use pattern matching with consolidated patterns
         message_lower = user_message.lower()
+        
+        # Use consolidated action verbs from semantic matcher
+        action_verbs = []
+        if self.semantic_matcher:
+            action_verbs = self.semantic_matcher._fallback_keywords['action_verbs']
+        else:
+            from .semantic_matcher import SemanticMatcher
+            temp_matcher = SemanticMatcher(llm_provider=None)
+            action_verbs = temp_matcher._fallback_keywords['action_verbs']
+        
+        # Check for patterns including action verbs
         patterns = [
             ("need to", "Need to"),
             ("should", "Should"),
             ("must", "Must"),
             ("have to", "Have to"),
             ("todo", "TODO:"),
-            ("fixme", "FIXME:"),
-            ("implement", "Implement"),
-            ("create", "Create"),
-            ("add", "Add"),
-            ("fix", "Fix"),
-            ("update", "Update"),
-            ("remove", "Remove"),
-            ("delete", "Delete")
+            ("fixme", "FIXME:")
         ]
+        
+        # Add action verbs as patterns
+        for verb in action_verbs[:10]:  # Limit to avoid too many patterns
+            patterns.append((verb, verb.title()))
         
         for pattern, prefix in patterns:
             if pattern in message_lower:
@@ -351,7 +415,7 @@ class TodoManager:
                     if pattern in sentence.lower():
                         clean_sentence = sentence.strip()
                         if len(clean_sentence) > 10 and len(clean_sentence) < 100:
-                            if not clean_sentence.startswith(prefix):
+                            if not clean_sentence.lower().startswith(prefix.lower()):
                                 clean_sentence = f"{prefix} {clean_sentence.lower()}"
                             suggestions.append(clean_sentence)
         

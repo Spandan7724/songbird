@@ -17,7 +17,6 @@ import typer
 from rich.console import Console
 from rich.status import Status
 from rich.markdown import Markdown
-from . import __version__
 from .llm.providers import get_default_provider_name, get_provider_info
 from .orchestrator import SongbirdOrchestrator
 from .memory.optimized_manager import OptimizedSessionManager

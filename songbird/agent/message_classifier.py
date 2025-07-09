@@ -37,51 +37,37 @@ class MessageClassifier:
     async def classify_message(self, message: str, context: Optional[Dict[str, Any]] = None) -> MessageIntent:
         """
         Classify a user message to determine intent and todo creation appropriateness.
-        
-        Args:
-            message: The user message to classify
-            context: Optional context (conversation history, existing todos, etc.)
-            
-        Returns:
-            MessageIntent object with classification results
         """
-        # Check cache first
         cache_key = self._get_cache_key(message, context)
         if cache_key in self._cache:
             return self._cache[cache_key]
         
-        # Build context information
+        
         context_info = self._build_context_info(context)
         
-        # Create classification prompt
+        
         prompt = self._build_classification_prompt(message, context_info)
         
         try:
-            # Get LLM classification
             messages = [{"role": "user", "content": prompt}]
             response = await self.llm_provider.chat_with_messages(messages)
             
             if response.content:
                 intent = self._parse_classification_response(response.content)
                 if intent:
-                    # Cache the result
                     self._cache[cache_key] = intent
                     return intent
             
         except Exception:
-            # Fall back to simple heuristics if LLM fails
             return self._fallback_classification(message)
         
-        # Default fallback
         return self._fallback_classification(message)
     
     def _get_cache_key(self, message: str, context: Optional[Dict[str, Any]]) -> str:
         """Generate cache key for message classification."""
-        # Simple key based on message length and first few words
         words = message.lower().split()[:5]
         key_parts = [str(len(message)), *words]
         
-        # Add context indicators if available
         if context:
             if context.get('existing_todos_count'):
                 key_parts.append(f"todos:{context['existing_todos_count']}")
@@ -149,7 +135,6 @@ Examples:
     def _parse_classification_response(self, response_content: str) -> Optional[MessageIntent]:
         """Parse the LLM response into a MessageIntent object."""
         try:
-            # Extract JSON from response
             json_match = re.search(r'\{.*?\}', response_content, re.DOTALL)
             if not json_match:
                 return None
@@ -157,7 +142,6 @@ Examples:
             json_str = json_match.group(0)
             data = json.loads(json_str)
             
-            # Validate required fields
             required_fields = [
                 'is_question', 'is_implementation_request', 'is_passive_request',
                 'is_todo_meta_query', 'complexity_level', 'estimated_todos_needed',
@@ -167,7 +151,6 @@ Examples:
             if not all(field in data for field in required_fields):
                 return None
             
-            # Validate enum values
             if data['complexity_level'] not in ['low', 'medium', 'high']:
                 return None
             
@@ -242,12 +225,10 @@ Examples:
         )
     
     def clear_cache(self):
-        """Clear the classification cache."""
         self._cache.clear()
     
     def get_cache_stats(self) -> Dict[str, int]:
-        """Get cache statistics for debugging."""
         return {
             "cache_size": len(self._cache),
-            "cache_entries": list(self._cache.keys())[:5]  # First 5 entries for debugging
+            "cache_entries": list(self._cache.keys())[:5]
         }

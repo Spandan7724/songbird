@@ -7,6 +7,7 @@ Tests diverse scenarios beyond just BFS to ensure generic applicability.
 import asyncio
 import sys
 import json
+import pytest
 from pathlib import Path
 
 # Add songbird to path
@@ -181,6 +182,7 @@ class MockToolRunner:
         ]
 
 
+@pytest.mark.asyncio
 async def test_todo_generation_granularity():
     """Test that todo generation creates appropriate granularity."""
     print("🧪 Testing Todo Generation Granularity...")
@@ -236,6 +238,7 @@ async def test_todo_generation_granularity():
     return passed == len(test_cases)
 
 
+@pytest.mark.asyncio
 async def test_tool_completion_analysis():
     """Test that tool actions properly complete relevant todos."""
     print("\n🧪 Testing Tool-Based Completion Analysis...")
@@ -300,6 +303,7 @@ async def test_tool_completion_analysis():
     return passed == len(test_cases)
 
 
+@pytest.mark.asyncio
 async def test_message_completion_analysis():
     """Test that user messages properly trigger completion."""
     print("\n🧪 Testing Message-Based Completion Analysis...")
@@ -348,6 +352,7 @@ async def test_message_completion_analysis():
     return passed == len(test_cases)
 
 
+@pytest.mark.asyncio
 async def test_end_to_end_workflow():
     """Test complete workflow: generate todos -> execute tools -> auto-complete."""
     print("\n🧪 Testing End-to-End Workflow...")

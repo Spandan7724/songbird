@@ -2,7 +2,6 @@
 Tests for bash mode functionality.
 """
 
-import pytest
 from songbird.commands.loader import is_bash_mode_input, parse_bash_input
 
 

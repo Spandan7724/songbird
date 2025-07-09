@@ -4,7 +4,7 @@
 import re
 import os
 from pathlib import Path
-from typing import List, NamedTuple, Optional
+from typing import List, Optional
 from dataclasses import dataclass
 
 

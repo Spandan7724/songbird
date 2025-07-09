@@ -1,4 +1,3 @@
-# songbird/agent/planning.py
 """Planning data structures for the agent core."""
 
 from dataclasses import dataclass, field
@@ -7,7 +6,6 @@ from enum import Enum
 
 
 class PlanStatus(Enum):
-    """Status of a plan or plan step."""
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -25,26 +23,22 @@ class PlanStep:
     status: PlanStatus = PlanStatus.PENDING
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
-    dependencies: List[str] = field(default_factory=list)  # Step IDs this depends on
+    dependencies: List[str] = field(default_factory=list) 
     
     def mark_completed(self, result: Dict[str, Any]) -> None:
-        """Mark step as completed with result."""
         self.status = PlanStatus.COMPLETED
         self.result = result
     
     def mark_failed(self, error: str) -> None:
-        """Mark step as failed with error."""
         self.status = PlanStatus.FAILED
         self.error = error
     
     def can_execute(self, completed_steps: List[str]) -> bool:
-        """Check if this step can be executed based on dependencies."""
         return all(dep_id in completed_steps for dep_id in self.dependencies)
 
 
 @dataclass
 class AgentPlan:
-    """Agent execution plan with multiple steps."""
     goal: str
     steps: List[PlanStep] = field(default_factory=list)
     current_step_index: int = 0
@@ -55,13 +49,11 @@ class AgentPlan:
     schema_version: str = "1.0"  # Version for serialization compatibility
     
     def add_step(self, step: PlanStep) -> None:
-        """Add a step to the plan."""
         if not step.step_id:
             step.step_id = f"step_{len(self.steps)}"
         self.steps.append(step)
     
     def get_next_step(self) -> Optional[PlanStep]:
-        """Get the next step to execute."""
         completed_step_ids = [
             step.step_id for step in self.steps 
             if step.status == PlanStatus.COMPLETED and step.step_id
@@ -75,17 +67,14 @@ class AgentPlan:
         return None
     
     def get_current_step(self) -> Optional[PlanStep]:
-        """Get the current step being executed."""
         if 0 <= self.current_step_index < len(self.steps):
             return self.steps[self.current_step_index]
         return None
     
     def is_complete(self) -> bool:
-        """Check if the plan is complete."""
         return all(step.status in [PlanStatus.COMPLETED, PlanStatus.SKIPPED] for step in self.steps)
     
     def has_failed(self) -> bool:
-        """Check if any step has failed."""
         return any(step.status == PlanStatus.FAILED for step in self.steps)
     
     def get_progress(self) -> Dict[str, Any]:
@@ -103,7 +92,6 @@ class AgentPlan:
         }
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert plan to dictionary for serialization."""
         return {
             "goal": self.goal,
             "steps": [

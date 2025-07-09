@@ -3,11 +3,9 @@ Tests for file reference parser functionality.
 """
 
 import tempfile
-import os
 from pathlib import Path
-import pytest
 
-from songbird.commands.file_reference_parser import FileReferenceParser, FileReference, parse_file_references
+from songbird.commands.file_reference_parser import FileReferenceParser, parse_file_references
 
 
 class TestFileReferenceParser:
