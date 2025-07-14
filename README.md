@@ -21,6 +21,10 @@
 
 </div>
 
+![Songbird Demo](media/songbird.gif)
+
+
+
 
 ## Downloading
 
