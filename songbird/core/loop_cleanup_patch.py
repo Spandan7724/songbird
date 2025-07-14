@@ -84,6 +84,10 @@ def suppress_event_loop_warnings():
     
     # Suppress specific asyncio warnings
     warnings.filterwarnings("ignore", category=RuntimeWarning, module="asyncio")
+    
+    # Suppress LiteLLM async client cleanup warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*close_litellm_async_clients.*never awaited.*")
+    warnings.filterwarnings("ignore", category=RuntimeWarning, module="litellm")
 
 
 # Automatic application of patches
