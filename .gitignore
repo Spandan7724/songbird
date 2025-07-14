@@ -30,14 +30,6 @@ htmlcov/
 Thumbs.db
 
 CLAUDE.md
-DISTRIBUTION.md
-TODO.md
-PHASE_5_COMPLETION.md
-SONGBIRD_REPAIR_PLAN.md
-COMPLETION_SUMMARY.md
-CHANGELOG.md
-GEMINI.md
-LITELLM_IMPLEMENTATION_PLAN.md
 my_diff.md
 songbird.egg-info/
 songbird/__pycache__/
@@ -49,9 +41,4 @@ repomix-output.xml
 test_scripts/
 songbird/llm/__pycache__/
 .aider*
-TODO_IMPLEMENTATION.md
-test_code_themes.py
-test_manual_todo_workflow.md
-ARCHITECTURE_DIAGRAM.md
-ARCHITECTURE_DETAILED.md
 personal_docs/
