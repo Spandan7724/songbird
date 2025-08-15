@@ -113,6 +113,20 @@ class ProviderAdapter:
             "max_context_length": self._get_max_context_length(),
             "tool_call_format": self._get_tool_call_format()
         }
+
+        # Try loading capability information from provider mapping
+        try:
+            from ..config.mapping_loader import load_provider_mapping
+
+            mapping = load_provider_mapping()
+            provider_cfg = mapping.get_provider_config(self.provider_name)
+            if provider_cfg and "supports_streaming" in provider_cfg:
+                base_capabilities["supports_streaming"] = bool(
+                    provider_cfg["supports_streaming"]
+                )
+        except Exception:
+            # If mapping can't be loaded, keep default value
+            pass
         
         # Provider-specific capabilities
         if self.provider_name == "ollama":

@@ -8,6 +8,8 @@ from datetime import datetime
 from rich.text import Text
 
 from ..llm.providers import BaseProvider
+from ..llm.unified_interface import create_provider_adapter
+from ..llm.types import ChatResponse
 from ..ui.data_transfer import UIMessage, AgentOutput
 from ..memory.models import Session, Message
 from ..memory.optimized_manager import OptimizedSessionManager
@@ -51,6 +53,7 @@ class AgentCore:
         self.plan_manager = PlanManager()
         self.message_classifier = MessageClassifier(self.provider)
         self.file_context_manager = FileContextManager()
+        self.provider_adapter = create_provider_adapter(provider)
         
         # Load system prompt from centralized prompts
         from ..prompts import get_core_system_prompt
@@ -231,14 +234,61 @@ class AgentCore:
                 logger.debug(f"Iteration {iteration_count}: Starting with {consecutive_no_tools} consecutive no-tool turns")
             
             tools = self.tool_runner.get_available_tools()
-            
+
             messages = self._build_messages_for_llm()
-            
+
             if verbose_logging:
-                logger.debug(f"Iteration {iteration_count}: Requesting LLM response with {len(tools)} tools available")
-            
-            response = await self.provider.chat_with_messages(messages, tools=tools)
-            
+                logger.debug(
+                    f"Iteration {iteration_count}: Requesting LLM response with {len(tools)} tools available"
+                )
+
+            ui_layer = getattr(self.tool_runner, "ui_layer", None)
+            capabilities = self.provider_adapter.get_provider_capabilities()
+            supports_streaming = (
+                capabilities.get("supports_streaming", False)
+                and hasattr(self.provider, "stream_chat")
+            )
+
+            streaming_mode = False
+            if supports_streaming:
+                try:
+                    streaming_mode = True
+                    if ui_layer and ui_layer.is_thinking():
+                        await ui_layer.hide_thinking()
+                    if ui_layer:
+                        await ui_layer.start_stream()
+
+                    full_content = ""
+                    tool_calls: List[Dict[str, Any]] = []
+                    async for chunk in self.provider.stream_chat(messages, tools=tools):
+                        token = chunk.get("content")
+                        if token:
+                            full_content += token
+                            if ui_layer:
+                                await ui_layer.stream_token(token)
+                        if chunk.get("tool_calls"):
+                            tool_calls.extend(chunk["tool_calls"])
+
+                    if ui_layer:
+                        await ui_layer.end_stream()
+
+                    response = ChatResponse(
+                        content=full_content,
+                        tool_calls=tool_calls or None,
+                    )
+                except Exception as e:
+                    streaming_mode = False
+                    logger.warning(
+                        f"Streaming failed, falling back to non-streaming: {e}"
+                    )
+                    if ui_layer:
+                        await ui_layer.end_stream()
+                    response = await self.provider.chat_with_messages(
+                        messages, tools=tools
+                    )
+            else:
+                response = await self.provider.chat_with_messages(messages, tools=tools)
+
             if response.content:
                 total_tokens_used += len(response.content.split()) * 1.3  # Rough approximation
             
@@ -297,17 +347,26 @@ class AgentCore:
                     logger.info(f"Iteration {iteration_count}: Two consecutive no-tool turns - terminating (task likely complete)")
                     # Two consecutive turns without tools - task likely complete
                     await self._add_final_assistant_message(response)
-                    assistant_message = UIMessage.assistant(response.content or "")
+                    assistant_message = UIMessage.assistant(
+                        response.content or "",
+                        streamed=streaming_mode,
+                    )
                     return AgentOutput.completion(assistant_message)
                 elif await self._should_terminate_loop(iteration_count, consecutive_no_tools, total_tokens_used, max_tokens_budget):
                     # Other termination criteria met
                     await self._add_final_assistant_message(response)
-                    assistant_message = UIMessage.assistant(response.content or "")
+                    assistant_message = UIMessage.assistant(
+                        response.content or "",
+                        streamed=streaming_mode,
+                    )
                     return AgentOutput.completion(assistant_message)
                 else:
                     # Add message and continue (might need clarification)
                     await self._add_final_assistant_message(response)
-                    assistant_message = UIMessage.assistant(response.content or "")
+                    assistant_message = UIMessage.assistant(
+                        response.content or "",
+                        streamed=streaming_mode,
+                    )
                     return AgentOutput.completion(assistant_message)
         
         # Maximum iterations reached

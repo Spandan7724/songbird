@@ -48,10 +48,12 @@ class UILayer:
         
     async def display_message(self, message: UIMessage) -> None:
         """Display a message with appropriate styling."""
+        if message.metadata and message.metadata.get("streamed"):
+            return
+
         # In quiet mode, only show final assistant responses
         if self.quiet_mode:
             if message.message_type == MessageType.ASSISTANT:
-                # Show only the content without any formatting in quiet mode
                 print(message.content)
             elif message.message_type == MessageType.ERROR:
                 self._display_error_message(message)
@@ -253,6 +255,29 @@ class UILayer:
         if self._thinking_status:
             self._thinking_status.stop()
             self._thinking_status = None
+
+    async def start_stream(self) -> None:
+        """Prepare UI for streaming assistant tokens."""
+        if self.quiet_mode:
+            print()
+            return
+        self.console.print("\n[medium_spring_green]Songbird:[/medium_spring_green] ", end="")
+        self.console.file.flush()
+
+    async def stream_token(self, token: str) -> None:
+        """Stream a token of assistant text."""
+        if self.quiet_mode:
+            print(token, end="", flush=True)
+            return
+        self.console.print(token, end="")
+        self.console.file.flush()
+
+    async def end_stream(self) -> None:
+        """Finalize streaming output."""
+        if self.quiet_mode:
+            print()
+            return
+        self.console.print("")
     
     async def pause_thinking(self) -> None:
         """Temporarily pause thinking indicator for tool output."""
