@@ -844,7 +844,7 @@ async def test_litellm_adapter():
     """Test function for LiteLLM adapter."""
     try:
         # Test provider creation
-        adapter = create_litellm_provider("openai", "gpt-4o-mini")
+        adapter = LiteLLMAdapter("openai/gpt-4o-mini")
         
         # Test basic completion
         messages = [{"role": "user", "content": "Hello, world!"}]
