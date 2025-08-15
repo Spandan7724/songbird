@@ -1,58 +1,49 @@
-# songbird/cli.py
 from __future__ import annotations
+
+# Apply event loop cleanup patches early to prevent BaseEventLoop.__del__ errors
+from .core.loop_cleanup_patch import apply_event_loop_cleanup_patch
+apply_event_loop_cleanup_patch()
+
 import asyncio
 import os
 import signal
 import sys
 import time
-import warnings
 from threading import Timer
 from typing import Optional
 from datetime import datetime
 import json
 import typer
-
-# HTTP session warnings should now be resolved by proper session management
-import logging
 from rich.console import Console
 from rich.status import Status
-from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.markdown import Markdown
-from . import __version__
-from .llm.providers import get_provider, get_default_provider, get_default_provider_name, list_available_providers, get_provider_info
+from .llm.providers import get_default_provider_name, get_provider_info
 from .orchestrator import SongbirdOrchestrator
 from .memory.optimized_manager import OptimizedSessionManager
 from .memory.models import Session
-from .commands import CommandInputHandler, get_command_registry
+from .commands import CommandInputHandler
 from .memory.history_manager import MessageHistoryManager
-from .commands.loader import is_command_input, parse_command_input, load_all_commands
-from .enhanced_interface import (
-    enhanced_cli, display_enhanced_help, display_version_info,
-    create_provider_status_table, create_banner
-)
+from .commands.loader import is_command_input, parse_command_input, load_all_commands, is_bash_mode_input, parse_bash_input
+from .tools.shell_exec import shell_exec_safe
+from .cli_utils import (enhanced_cli, display_enhanced_help)
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich",
-                  help="Songbird - Terminal-first AI coding companion", no_args_is_help=False)
+                  help="Songbird - Terminal-based AI coding companion", no_args_is_help=False)
 console = Console()
 
 
 def render_ai_response(content: str, speaker_name: str = "Songbird"):
     """
     Render AI response content as markdown with proper formatting.
-    Avoids using # headers to prevent box formation in terminal.
     """
     if not content or not content.strip():
         return
-    
-    # Clean up the content - remove any # headers and replace with **bold**
+
     lines = content.split('\n')
     cleaned_lines = []
     
     for line in lines:
-        # Convert # headers to **bold** text to avoid boxes
         if line.strip().startswith('#'):
-            # Remove # symbols and make bold
             header_text = line.lstrip('#').strip()
             if header_text:
                 cleaned_lines.append(f"**{header_text}**")
@@ -62,11 +53,8 @@ def render_ai_response(content: str, speaker_name: str = "Songbird"):
             cleaned_lines.append(line)
     
     cleaned_content = '\n'.join(cleaned_lines)
-    
-    # Create markdown renderable
+
     md_renderable = Markdown(cleaned_content, code_theme="github-dark")
-    
-    # Print speaker name with color, then markdown content
     console.print(f"\n[medium_spring_green]{speaker_name}[/medium_spring_green]:")
     console.print(md_renderable)
 
@@ -81,30 +69,25 @@ _in_status = False     # track if we're in a status/thinking state
 
 def _flash_notice():
     global _cleanup_timer
-    # Cancel any existing cleanup timer to prevent accumulation
     if _cleanup_timer:
         _cleanup_timer.cancel()
     
-    # If we're in status mode, use console.print instead of raw output
     if _in_status:
-        # Don't try to manipulate cursor during status
         return
     
-    # Normal mode - use ANSI escape sequences
-    sys.stdout.write("\033[s")  # Save cursor position
-    sys.stdout.write("\033[A")  # Move up one line
-    sys.stdout.write("\r\033[2K")  # Clear that line
-    sys.stdout.write("\033[90mPress Ctrl+C again to exit\033[0m")  # Gray notice
-    sys.stdout.write("\033[u")  # Restore cursor position
+    sys.stdout.write("\033[s") 
+    sys.stdout.write("\033[A")  
+    sys.stdout.write("\r\033[2K") 
+    sys.stdout.write("\033[90mPress Ctrl+C again to exit\033[0m")  
+    sys.stdout.write("\033[u") 
     sys.stdout.flush()
     
-    # Schedule cleanup: clear the notice line above
     def _clear():
         if not _in_status:
-            sys.stdout.write("\033[s")  # Save cursor position
-            sys.stdout.write("\033[A")  # Move up one line
-            sys.stdout.write("\r\033[2K")  # Clear that line
-            sys.stdout.write("\033[u")  # Restore cursor position
+            sys.stdout.write("\033[s") 
+            sys.stdout.write("\033[A")  
+            sys.stdout.write("\r\033[2K")  
+            sys.stdout.write("\033[u") 
             sys.stdout.flush()
         
     _cleanup_timer = Timer(_GRACE, _clear)
@@ -114,39 +97,32 @@ def _sigint(signum, frame):
     global _last, _cleanup_timer
     now = time.monotonic()
 
-    if _last and (now - _last) < _GRACE:          # second tap → quit
-        # Cancel any pending cleanup timer before exit
+    if _last and (now - _last) < _GRACE:        
         if _cleanup_timer:
             _cleanup_timer.cancel()
         signal.signal(signal.SIGINT, signal.default_int_handler)
         
         if _in_status:
-            # Force stop the status if active
             console.print("\n[red]Interrupted![/red]")
         else:
-            # Clear the notice line if it exists
-            sys.stdout.write("\033[A\r\033[2K\033[B")  # Up, clear, down
+            sys.stdout.write("\033[A\r\033[2K\033[B") 
         
-        print()  # Clean newline before exit
+        print()  
         raise KeyboardInterrupt
 
-    # First tap handling
     if _in_status:
-        # During status/thinking, just show a console message
         console.print("\n[dim]Press Ctrl+C again to exit[/dim]")
     else:
-        # Normal input mode - erase ^C and show notice
-        sys.stdout.write("\b\b  \b\b")  # Backspace over ^C
+        sys.stdout.write("\b\b  \b\b")  
         sys.stdout.flush()
         _flash_notice()
     
-    _last = now               # start grace window
+    _last = now  
 
-# Register the signal handler
+
 signal.signal(signal.SIGINT, _sigint)
-# ------------------------------------------------------------------ #
+
 def show_banner():
-    """Display the Songbird ASCII banner in blue."""
     banner = """
 ███████╗ ██████╗ ███╗   ██╗ ██████╗ ██████╗ ██╗██████╗ ██████╗ 
 ██╔════╝██╔═══██╗████╗  ██║██╔════╝ ██╔══██╗██║██╔══██╗██╔══██╗
@@ -159,7 +135,6 @@ def show_banner():
 
 
 def format_time_ago(dt: datetime) -> str:
-    """Format a datetime as a human-readable time ago string."""
     now = datetime.now()
     diff = now - dt
 
@@ -178,7 +153,6 @@ def format_time_ago(dt: datetime) -> str:
 def _get_session_display_info(session_manager, session_id: str) -> tuple[int, str]:
     """Get user message count and last user message for session display."""
     try:
-        # Try to get from session manager's storage directory
         storage_dir = session_manager.storage_dir
         session_file = storage_dir / f"{session_id}.jsonl"
         
@@ -214,37 +188,30 @@ def display_session_selector(sessions: list[Session], session_manager) -> Option
         console.print("No previous sessions found.", style="yellow")
         return None
 
-    # Sort sessions by updated_at descending
     sessions.sort(key=lambda s: s.updated_at, reverse=True)
-    
-    # Limit sessions to avoid terminal overflow
     max_sessions = min(30, console.height - 10 if console.height > 10 else 20)
     display_sessions = sessions[:max_sessions]
     
-    # Prepare options
     options = []
     for session in display_sessions:
         created = format_time_ago(session.created_at)
         modified = format_time_ago(session.updated_at)
         
-        # Get actual message count and last user message from session file
         user_msg_count, last_user_msg = _get_session_display_info(session_manager, session.id)
-        
-        # Use last user message as summary, truncated
+
         if last_user_msg:
-            summary = last_user_msg[:35]  # Slightly shorter to make room for provider info
+            summary = last_user_msg[:35]  
             if len(last_user_msg) > 35:
                 summary += "..."
         else:
             summary = "Empty session"
         
-        # Add provider type information
         provider_info = ""
         if session.provider_config:
             provider = session.provider_config.get("provider", "unknown")
             provider_info = f"[{provider}]"
         else:
-            provider_info = "[legacy]"
+            provider_info = "[unknown]"
         
         option = f"{modified} | {created} | {user_msg_count} msgs | {provider_info} | {summary}"
         options.append(option)
@@ -254,7 +221,6 @@ def display_session_selector(sessions: list[Session], session_manager) -> Option
     if len(sessions) > max_sessions:
         console.print(f"[yellow]Showing {max_sessions} most recent sessions out of {len(sessions)} total[/yellow]\n")
     
-    # Use interactive menu (synchronous)
     from .conversation import interactive_menu
     try:
         selected_idx = interactive_menu(
@@ -273,17 +239,13 @@ def display_session_selector(sessions: list[Session], session_manager) -> Option
 
 
 def replay_conversation(session: Session):
-    """Replay the conversation history to show it as the user saw it."""
-    # Import here to avoid circular dependency
     from .tools.file_operations import display_diff_preview
 
-    # Group messages with their tool calls and results
     i = 0
     while i < len(session.messages):
         msg = session.messages[i]
 
         if msg.role == "system":
-            # Skip system messages in replay
             i += 1
             continue
 
@@ -292,16 +254,9 @@ def replay_conversation(session: Session):
             i += 1
 
         elif msg.role == "assistant":
-            # Check if this is a tool-calling message
             if msg.tool_calls:
-                # Show thinking message
-                console.print(
-                    "\n[medium_spring_green]Songbird[/medium_spring_green] (thinking...)", style="dim")
-
-                # Track tool index for matching with tool results
                 tool_result_idx = i + 1
 
-                # Process each tool call
                 for tool_call in msg.tool_calls:
                     function_name = tool_call["function"]["name"]
                     arguments = tool_call["function"]["arguments"]
@@ -324,19 +279,58 @@ def replay_conversation(session: Session):
                         content = arguments.get("content", "")
 
                         console.print(f"\nCreating new file: {file_path}")
-                        # Determine language from file extension
-                        ext = file_path.split(
-                            '.')[-1] if '.' in file_path else 'text'
-                        # Create numbered lines manually to match original formatting
-                        lines = content.split('\n')
-                        numbered_lines = []
-                        for idx, line in enumerate(lines, 1):
-                            numbered_lines.append(f"  {idx:2d} {line}")
-                        formatted_content = '\n'.join(numbered_lines)
-                        console.print(
-                            f"╭─ New file: {file_path} {'─' * (console.width - len(file_path) - 15)}╮")
-                        console.print(formatted_content)
-                        console.print(f"╰{'─' * (console.width - 2)}╯")
+                        
+                        # Use Rich syntax highlighting for proper restoration
+                        from rich.syntax import Syntax
+                        from rich.panel import Panel
+                        from pathlib import Path
+                        
+                        # Get lexer from file extension
+                        path = Path(file_path)
+                        try:
+                            # Lexer mapping for file extensions
+                            lexer_map = {
+                                '.py': 'python', 
+                                '.js': 'javascript', 
+                                '.ts': 'typescript',
+                                '.html': 'html', 
+                                '.css': 'css', 
+                                '.json': 'json',
+                                '.yaml': 'yaml', 
+                                '.yml': 'yaml', 
+                                '.md': 'markdown',
+                                '.sh': 'bash', 
+                                '.c': 'c', 
+                                '.cpp': 'cpp', 
+                                '.java': 'java'
+                            }
+                            
+                            lexer = lexer_map.get(path.suffix, 'text')
+                        except:
+                            lexer = 'text'
+                        
+                        # Create syntax highlighted content
+                        syntax = Syntax(
+                            content,
+                            lexer=lexer,
+                            theme="github-dark",
+                            line_numbers=True,
+                            word_wrap=False
+                        )
+                        
+                        # Create panel to match live session formatting
+                        panel = Panel(
+                            syntax,
+                            title=f"New file: {path.name}",
+                            title_align="left",
+                            border_style="green",
+                            expand=False,
+                            width=min(console.width - 2, 120)
+                        )
+                        
+                        console.print("")
+                        console.print(panel)
+                        console.print("")
 
                     elif function_name == "file_edit" and tool_result:
                         file_path = tool_result.get(
@@ -446,35 +440,274 @@ def replay_conversation(session: Session):
             i += 1
 
 
+
+async def interactive_set_default():
+    """Interactive menu for setting default provider and model."""
+    from .commands.model_command import ModelCommand
+    from .conversation import safe_interactive_menu
+    
+    # Get available providers (disable discovery to avoid event loop issues, use quiet mode)
+    provider_info = get_provider_info(use_discovery=False, quiet=True)
+    available_providers = [name for name, info in provider_info.items() if info["ready"]]
+    
+    if not available_providers:
+        console.print("[red]No providers are ready (missing API keys or services not running)[/red]")
+        console.print("[yellow]Configure providers first:[/yellow]")
+        console.print("  export OPENAI_API_KEY='...'")
+        console.print("  export ANTHROPIC_API_KEY='...'") 
+        console.print("  export GEMINI_API_KEY='...'")
+        console.print("  ollama serve  # For local models")
+        return
+    
+    # Provider selection
+    console.print("\n[bold cornflower_blue]Select Default Provider:[/bold cornflower_blue]")
+    provider_options = available_providers + ["Cancel"]
+    
+    provider_idx = await safe_interactive_menu(
+        "Choose default provider:", 
+        provider_options,
+        default_index=0
+    )
+    
+    if provider_idx is None or provider_idx == len(available_providers):
+        console.print("[white dim]Default setting cancelled[/white dim]")
+        return
+    
+    selected_provider = available_providers[provider_idx]
+    
+    # Model selection for the chosen provider
+    console.print(f"\n[bold cornflower_blue]Select Default Model for {selected_provider}:[/bold cornflower_blue]")
+    
+    # Get models for this provider (use same method as /model command for consistency)
+    try:
+        model_cmd = ModelCommand()
+        if selected_provider == "copilot":
+            models = await model_cmd._get_copilot_models()
+        else:
+            models = await model_cmd._get_litellm_models(selected_provider)
+    except Exception as e:
+        console.print(f"[yellow]Could not get models for {selected_provider}: {e}[/yellow]")
+        # Use provider's default model
+        await set_default_provider_and_model(selected_provider, None)
+        return
+    
+    if not models:
+        console.print(f"[yellow]No models available for {selected_provider}[/yellow]")
+        await set_default_provider_and_model(selected_provider, None)
+        return
+    
+    # Add cancel option
+    model_options = models + ["Cancel"]
+    
+    model_idx = await safe_interactive_menu(
+        f"Choose default model for {selected_provider}:",
+        model_options,
+        default_index=0
+    )
+    
+    if model_idx is None or model_idx == len(models):
+        console.print("[white dim]Model selection cancelled[/white dim]")
+        return
+    
+    selected_model = models[model_idx]
+    await set_default_provider_and_model(selected_provider, selected_model)
+
+
+async def set_default_provider_and_model(provider_name: str, model_name: Optional[str] = None):
+    """Set the default provider and optionally model in configuration."""
+    from .config.config_manager import get_config_manager
+    from .commands.model_command import ModelCommand
+    
+    # Validate provider
+    valid_providers = ["openai", "claude", "gemini", "ollama", "openrouter", "copilot"]
+    if provider_name not in valid_providers:
+        console.print(f"[red]Error: Invalid provider '{provider_name}'[/red]")
+        console.print(f"[yellow]Valid providers: {', '.join(valid_providers)}[/yellow]")
+        return
+    
+    # Check if provider has prerequisites
+    model_cmd = ModelCommand()
+    is_ready, error_msg = model_cmd._check_provider_prerequisites(provider_name)
+    if not is_ready:
+        console.print(f"[red]Error: Provider '{provider_name}' is not ready[/red]")
+        console.print(f"[yellow]{error_msg}[/yellow]")
+        return
+    
+    # Get configuration manager
+    config_manager = get_config_manager()
+    config = config_manager.get_config()
+    
+    # If no model specified, use provider's current default
+    if model_name is None:
+        model_name = config.llm.default_models.get(provider_name)
+        if not model_name:
+            # Use hardcoded defaults as fallback
+            fallback_models = {
+                "openai": "gpt-4o",
+                "claude": "claude-3-5-sonnet-20241022",
+                "gemini": "gemini-2.0-flash",
+                "ollama": "qwen2.5-coder:7b",
+                "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+                "copilot": "gpt-4o"
+            }
+            model_name = fallback_models.get(provider_name, "")
+    
+    # Validate model for the provider (optional - just warn if invalid)
+    try:
+        if provider_name == "copilot":
+            available_models = await model_cmd._get_copilot_models()
+        else:
+            available_models = await model_cmd._get_litellm_models(provider_name)
+        
+        if model_name and available_models and model_name not in available_models:
+            console.print(f"[yellow]Warning: Model '{model_name}' may not be available for {provider_name}[/yellow]")
+            console.print(f"[yellow]Available models: {', '.join(available_models[:5])}{'...' if len(available_models) > 5 else ''}[/yellow]")
+            
+            # Ask for confirmation
+            response = input("Continue anyway? (y/N): ").strip().lower()
+            if response not in ['y', 'yes']:
+                console.print("[white dim]Default setting cancelled[/white dim]")
+                return
+    except Exception as e:
+        # Non-critical - model validation failed, but continue anyway
+        console.print(f"[dim]Could not validate model availability: {e}[/dim]")
+    
+    # Update configuration
+    config.llm.default_provider = provider_name
+    if model_name:
+        config.llm.default_models[provider_name] = model_name
+    
+    # Save configuration
+    config_manager.save_config(config)
+    
+    # Show confirmation
+    console.print(f"[green]✓ Default provider set to:[/green] [bold]{provider_name}[/bold]")
+    if model_name:
+        console.print(f"[green]✓ Default model for {provider_name} set to:[/green] [bold]{model_name}[/bold]")
+    
+    console.print(f"\n[dim]Configuration saved to: {config_manager.config_file}[/dim]")
+    console.print("[dim]Use 'songbird' without --provider to use these defaults[/dim]")
+
+
+async def execute_print_mode(message: str, provider: Optional[str] = None, provider_url: Optional[str] = None, ultra_quiet: bool = False):
+    try:
+        # Determine provider
+        provider_name = provider or get_default_provider_name()
+        
+        # Get default model from configuration
+        model_name = None
+        try:
+            from .config.config_manager import get_config_manager
+            config_manager = get_config_manager()
+            config = config_manager.get_config()
+            model_name = config.llm.default_models.get(provider_name)
+        except Exception:
+            pass
+        
+        if not model_name:
+            # Fallback to hardcoded defaults
+            fallback_models = {
+                "openai": "gpt-4o",
+                "claude": "claude-3-5-sonnet-20241022",
+                "gemini": "gemini-2.0-flash",
+                "ollama": "qwen2.5-coder:7b",   
+                "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+                "copilot": "gpt-4o"
+            }
+            model_name = fallback_models.get(provider_name, fallback_models.get("ollama"))
+        
+        # Create provider instance with quiet mode
+        if provider_name == "copilot":
+            from .llm.providers import get_copilot_provider
+            provider_instance = get_copilot_provider(model=model_name, quiet=True)
+        else:
+            # Use LiteLLM for all other providers
+            from .llm.providers import get_litellm_provider
+            provider_instance = get_litellm_provider(
+                provider_name=provider_name,
+                model=model_name,
+                api_base=provider_url,
+                session_metadata=None
+            )
+
+        orchestrator = SongbirdOrchestrator(
+            provider=provider_instance,
+            working_directory=os.getcwd(),
+            session=None, 
+            ui_layer=None, 
+            quiet_mode=True  
+        )
+        
+        if ultra_quiet:
+            import sys
+            import io
+            from contextlib import redirect_stdout, redirect_stderr
+            
+            captured_output = io.StringIO()
+            with redirect_stdout(captured_output), redirect_stderr(captured_output):
+                response = await orchestrator.chat_single_message(message)
+            
+          
+            if response and response.strip():
+                print(response)
+        else:
+            
+            response = await orchestrator.chat_single_message(message)
+           
+        
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
     provider: Optional[str] = typer.Option(
-        None, "--provider", "-p", help="LLM provider to use (openai, claude, gemini, ollama, openrouter)"),
+        None, "--provider", help="LLM provider to use (openai, claude, gemini, ollama, openrouter)"),
     list_providers: bool = typer.Option(
         False, "--list-providers", help="List available providers and exit"),
     continue_session: bool = typer.Option(
         False, "--continue", "-c", help="Continue the latest session"),
     resume_session: bool = typer.Option(
         False, "--resume", "-r", help="Resume a previous session from a list"),
-    use_litellm: bool = typer.Option(
-        False, "--litellm", help="Use LiteLLM unified interface (default when legacy unavailable)"),
     provider_url: Optional[str] = typer.Option(
-        None, "--provider-url", help="Custom API base URL for provider", hidden=True)
+        None, "--provider-url", help="Custom API base URL for provider", hidden=True),
+    set_default: bool = typer.Option(
+        False, "--default", help="Set default provider and model interactively"),
+    print_mode: Optional[str] = typer.Option(
+        None, "--print", "-p", help='Print mode: execute single command and output result only. Use quotes for multi-word messages: -p "your message"'),
+    quiet_mode: bool = typer.Option(
+        False, "--quiet", "-q", help="Suppress tool output in print mode, show only final answer")
 ):
     """
-    Songbird - Terminal-first AI coding companion
+    Songbird - Terminal-based AI coding companion
     
     Run 'songbird' to start an interactive chat session with AI and tools.
     Run 'songbird --continue' to continue your latest session.
     Run 'songbird --resume' to select and resume a previous session.
-    Run 'songbird --litellm' to use the new LiteLLM unified interface.
+    Run 'songbird --default' to set your default provider and model interactively.
+    Run 'songbird -p "message"' for one-off commands with clean output (use quotes for multi-word messages).
+    Run 'songbird -p "message" --quiet' for ultra-clean output (final answer only).
     Run 'songbird version' to show version information.
     """
+    # Validate that --quiet can only be used with --print
+    if quiet_mode and not print_mode:
+        console.print("[red]Error: --quiet can only be used with --print mode[/red]")
+        console.print("Usage: songbird --print --quiet \"your message\"")
+        raise typer.Exit(1)
+    
+    if set_default:
+        # Handle --default flag - always interactive mode
+        import asyncio
+        asyncio.run(interactive_set_default())
+        return
+    
     if list_providers:
-        from .llm.providers import get_provider_info
-        
-        provider_info = get_provider_info()
+        provider_info = get_provider_info(use_discovery=True, quiet=False)
         default = get_default_provider_name()
         
         console.print("Available LLM Providers:", style="bold cornflower_blue")
@@ -507,11 +740,33 @@ def main(
         
         return
 
+    if print_mode:
+        # Handle print mode - single command execution
+        import asyncio
+        asyncio.run(execute_print_mode(print_mode, provider, provider_url, quiet_mode))
+        return
+
     if ctx.invoked_subcommand is None:
         # No subcommand provided, start chat session
         chat(provider=provider,
              continue_session=continue_session, resume_session=resume_session,
-             use_litellm=use_litellm, provider_url=provider_url)
+             provider_url=provider_url)
+
+
+@app.command()
+def default(
+    provider: Optional[str] = typer.Argument(None, help="Provider name (openai, claude, gemini, ollama, openrouter, copilot)"),
+    model: Optional[str] = typer.Argument(None, help="Model name (optional)")
+):
+    """Set default provider and optionally model for new sessions."""
+    if provider is None:
+        # Interactive mode
+        import asyncio
+        asyncio.run(interactive_set_default())
+    else:
+        # Direct mode with provider and optional model
+        import asyncio
+        asyncio.run(set_default_provider_and_model(provider.lower(), model))
 
 
 @app.command(hidden=True)
@@ -519,12 +774,11 @@ def chat(
     provider: Optional[str] = None,
     continue_session: bool = False,
     resume_session: bool = False,
-    use_litellm: bool = False,
     provider_url: Optional[str] = None
 ) -> None:
     """Start an interactive Songbird session with AI and tools."""
     show_banner()
-
+    
     # Initialize optimized session manager
     session_manager = OptimizedSessionManager(working_directory=os.getcwd())
     session = None
@@ -551,8 +805,7 @@ def chat(
                 restored_model = session.provider_config.get("model")
                 # Check if session was using LiteLLM
                 if session.is_litellm_session():
-                    use_litellm = True
-                    console.print(f"[dim]Restored LiteLLM session: {restored_provider} - {restored_model}[/dim]")
+                    console.print(f"[dim]Restored session: {restored_provider} - {restored_model}[/dim]")
                 elif restored_provider and restored_model:
                     console.print(
                         f"[dim]Restored: {restored_provider} - {restored_model}[/dim]")
@@ -582,8 +835,7 @@ def chat(
                         restored_model = session.provider_config.get("model")
                         # Check if session was using LiteLLM
                         if session.is_litellm_session():
-                            use_litellm = True
-                            console.print(f"[dim]Restored LiteLLM session: {restored_provider} - {restored_model}[/dim]")
+                            console.print(f"[dim]Restored session: {restored_provider} - {restored_model}[/dim]")
                         elif restored_provider and restored_model:
                             console.print(
                                 f"[dim]Restored: {restored_provider} - {restored_model}[/dim]")
@@ -624,45 +876,71 @@ def chat(
     # Use restored values if available, otherwise use defaults
     provider_name = restored_provider or provider or get_default_provider_name()
 
-    # Set default models based on provider
-    default_models = {
-        "openai": "gpt-4o",
-        "claude": "claude-3-5-sonnet-20241022",
-        "gemini": "gemini-1.5-flash-latest",
-        "ollama": "qwen2.5-coder:7b",
-        "openrouter": "deepseek/deepseek-chat-v3-0324:free",
-        "copilot": "gpt-4o"
-    }
-    model_name = restored_model or default_models.get(
-        provider_name, default_models.get("ollama"))
+    # Get default model from configuration
+    model_name = restored_model
+    if not model_name:
+        try:
+            from .config.config_manager import get_config_manager
+            config_manager = get_config_manager()
+            config = config_manager.get_config()
+            
+            # Get configured default model for this provider
+            model_name = config.llm.default_models.get(provider_name)
+            
+            if not model_name:
+                # Fallback to hardcoded defaults
+                fallback_models = {
+                    "openai": "gpt-4o",
+                    "claude": "claude-3-5-sonnet-20241022",
+                    "gemini": "gemini-2.0-flash",
+                    "ollama": "qwen2.5-coder:7b",   
+                    "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+                    "copilot": "gpt-4o"
+                }
+                model_name = fallback_models.get(provider_name, fallback_models.get("ollama"))
+        except Exception:
+            # If config loading fails, use hardcoded defaults
+            fallback_models = {
+                "openai": "gpt-4o",
+                "claude": "claude-3-5-sonnet-20241022", 
+                "gemini": "gemini-2.0-flash",
+                "ollama": "qwen2.5-coder:7b",   
+                "openrouter": "deepseek/deepseek-chat-v3-0324:free",
+                "copilot": "gpt-4o"
+            }
+            model_name = fallback_models.get(provider_name, fallback_models.get("ollama"))
 
     # Save initial provider config to session (if we have a session)
     if session:
         session.update_provider_config(provider_name, model_name)
         session_manager.save_session(session)
 
-    # Show LiteLLM usage status
-    if use_litellm:
-        console.print(
-            f"Using LiteLLM provider: {provider_name}, model: {model_name}", style="cornflower_blue")
-    else:
-        console.print(
-            f"Using provider: {provider_name}, model: {model_name}", style="dim")
+    # Show provider status
+    console.print(
+        f"Using provider: {provider_name}, model: {model_name}", style="cornflower_blue")
 
     # Configure aiohttp session management for Google GenAI SDK
     try:
         from .llm.aiohttp_session_manager import configure_google_genai_aiohttp
         configure_google_genai_aiohttp()
-    except Exception as e:
+    except Exception:
         # Non-critical error, continue without custom session configuration
         pass
     
     # Initialize LLM provider and conversation orchestrator
     try:
-        if use_litellm:
-            # Use LiteLLM unified provider
+        # All providers now use LiteLLM except Copilot (custom provider)
+        if provider_name == "copilot":
+            from .llm.providers import get_copilot_provider
+            provider_instance = get_copilot_provider(model=model_name)
+            
+            # Update session with custom provider config if we have a session
+            if session:
+                session.update_provider_config(provider_name, model_name, provider_type="custom")
+                session_manager.save_session(session)
+        else:
+            # Use LiteLLM for all other providers
             from .llm.providers import get_litellm_provider
-            # console.print(f"[cornflower_blue]Using LiteLLM unified interface for {provider_name}[/cornflower_blue]")
             
             provider_instance = get_litellm_provider(
                 provider_name=provider_name,
@@ -671,20 +949,6 @@ def chat(
                 # Add session metadata tracking
                 session_metadata=session.provider_config if session else None
             )
-            
-            # Update session with LiteLLM configuration if we have a session
-            if session:
-                session.update_litellm_config(
-                    provider=provider_name,
-                    model=model_name,
-                    litellm_model=provider_instance.model,
-                    api_base=provider_url
-                )
-                session_manager.save_session(session)
-        else:
-            # Since legacy providers have been removed, get_provider now returns LiteLLM providers
-            # console.print(f"[cornflower_blue]Using LiteLLM unified interface for {provider_name}[/cornflower_blue]")
-            provider_instance = get_provider(provider_name)
             
             # Update session with LiteLLM configuration if we have a session
             if session:
@@ -704,29 +968,71 @@ def chat(
         orchestrator = SongbirdOrchestrator(
             provider_instance, os.getcwd(), session=session, ui_layer=ui_layer)
 
-        # Start chat loop
-        asyncio.run(_chat_loop(orchestrator, command_registry, command_input_handler,
-                               provider_name, provider_instance))
+        # Start chat loop with proper event loop management
+        async def managed_chat():
+            try:
+                
+                await _chat_loop(orchestrator, command_registry, command_input_handler,
+                                provider_name, provider_instance)
+            finally:
+                # Ensure cleanup even if chat loop exits unexpectedly
+                
+                try:
+                    from .core.event_loop_manager import ensure_clean_shutdown
+                    ensure_clean_shutdown()
+                except Exception:
+                    pass
+        
+        # Use manual event loop management to prevent BaseEventLoop.__del__ errors
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Register the loop for cleanup
+                from .core.event_loop_manager import event_loop_manager
+                event_loop_manager.register_loop(loop)
+                
+                # Run the managed chat
+                loop.run_until_complete(managed_chat())
+            finally:
+                try:
+                    # Proper event loop cleanup
+                    pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+                    if pending_tasks:
+                        # Cancel pending tasks
+                        for task in pending_tasks:
+                            task.cancel()
+                        # Wait for cancellation
+                        loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+                    
+                    # Close the loop properly
+                    loop.close()
+                except Exception:
+                    # Log cleanup error but don't crash
+                    pass
+        except Exception:
+            # Fallback to asyncio.run if manual management fails
+            asyncio.run(managed_chat())
 
     except Exception as e:
         console.print(f"Error starting Songbird: {e}", style="red")
         
-        # Provide helpful troubleshooting information based on provider and mode
-        provider_mode = "LiteLLM" if use_litellm else "Legacy"
-        console.print(f"[dim]Provider mode: {provider_mode}[/dim]")
-        
-        if use_litellm:
-            # LiteLLM-specific guidance
+        # Provide helpful troubleshooting information
+        if provider_name == "copilot":
+            console.print("\n[bold yellow]Copilot Troubleshooting:[/bold yellow]")
+            console.print("• Check that COPILOT_ACCESS_TOKEN is properly configured", style="dim")
+            console.print("• Verify you have access to GitHub Copilot Chat API", style="dim")
+        else:
             console.print("\n[bold yellow]LiteLLM Troubleshooting:[/bold yellow]")
             console.print("• Check the LiteLLM adapter initialization above for specific error details", style="dim")
             console.print("• Verify your model string follows LiteLLM format: 'provider/model'", style="dim")
-            console.print("• Try running without --litellm flag to use legacy provider as fallback", style="dim")
+            console.print("• All providers now use LiteLLM unified interface", style="dim")
             
             if provider_url:
                 console.print(f"• Custom API base URL in use: {provider_url}", style="dim")
                 console.print("• Verify the custom API endpoint is accessible and correct", style="dim")
             
-        # Common provider guidance (works for both LiteLLM and legacy)
+        # Common provider guidance
         if provider_name == "openai":
             console.print(
                 "\n[bold]OpenAI Setup:[/bold] Set OPENAI_API_KEY environment variable", style="dim")
@@ -753,8 +1059,8 @@ def chat(
             console.print(
                 f"And the model is available: ollama pull {model_name}", style="dim")
         
-        # Additional LiteLLM guidance
-        if use_litellm:
+        # Additional resources
+        if provider_name != "copilot":
             console.print("\n[bold]LiteLLM Resources:[/bold]", style="dim")
             console.print("• LiteLLM Documentation: https://docs.litellm.ai/", style="dim")
             console.print("• Supported Providers: https://docs.litellm.ai/docs/providers", style="dim")
@@ -767,6 +1073,14 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
                      command_input_handler, provider_name: str, provider_instance):
     """Run the interactive chat loop with improved status handling."""
     
+    # Register the current event loop for proper cleanup
+    try:
+        from .core.event_loop_manager import register_current_loop
+        register_current_loop()
+    except Exception:
+        # Non-critical error
+        pass
+    
     while True:
         try:
             # Get user input using command input handler (keeps prompt-toolkit history)
@@ -777,6 +1091,24 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
                 break
                 
             if not user_input.strip():
+                continue
+            
+            # Handle bash mode commands (starting with !)
+            if is_bash_mode_input(user_input):
+                bash_command = parse_bash_input(user_input)
+                if bash_command:
+                    try:
+                        # Execute shell command using existing shell_exec tool
+                        result = await shell_exec_safe(
+                            command=bash_command,
+                            working_dir=orchestrator.working_directory,
+                            show_live_output=True
+                        )
+                            
+                    except Exception as e:
+                        console.print(f"[red]Error executing bash command: {e}[/red]")
+                else:
+                    console.print("[yellow]Empty bash command[/yellow]")
                 continue
                 
             # Handle commands
@@ -819,24 +1151,20 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
                             new_model = result.data["new_model"]
 
                             # Determine if we're using LiteLLM
-                            is_litellm_provider = hasattr(provider_instance, 'vendor_prefix') and hasattr(provider_instance, 'model_name')
-                            
                             # Update session with appropriate provider config
                             if orchestrator.session:
-                                if is_litellm_provider:
-                                    # For LiteLLM, update with LiteLLM-specific config
+                                if provider_name == "copilot":
+                                    # Copilot uses custom provider, not LiteLLM
+                                    orchestrator.session.update_provider_config(
+                                        provider_name, new_model, provider_type="custom")
+                                else:
+                                    # All other providers use LiteLLM
                                     orchestrator.session.update_litellm_config(
                                         provider=provider_name,
                                         model=new_model,
                                         litellm_model=provider_instance.model,  # The resolved LiteLLM model string
                                         api_base=getattr(provider_instance, 'api_base', None)
                                     )
-                                    console.print(f"[dim]Model changed: {provider_name} - {new_model} -> {provider_instance.model}[/dim]")
-                                else:
-                                    # For legacy providers, use legacy config
-                                    orchestrator.session.update_provider_config(
-                                        provider_name, new_model, provider_type="legacy")
-                                    console.print(f"[dim]Legacy model changed: {provider_name} - {new_model}[/dim]")
                                 
                                 # Always save session when model changes
                                 orchestrator.session_manager.save_session(orchestrator.session)
@@ -849,9 +1177,8 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
                                 )
                                 orchestrator.session.add_message(context_msg)
 
-                            # Show the model change
-                            model_display = f"{provider_name} - {new_model}"
-                            console.print(f"[dim]Now using: {model_display}[/dim]")
+                            # Single clean confirmation message
+                            console.print(f"[cornflower_blue]Switched to model:[/cornflower_blue] {new_model}")
 
                     continue
                 else:
@@ -867,7 +1194,7 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
             
             # Create and manage status properly
             status = Status(
-                "[dim]Songbird (thinking…)[/dim]",
+                "",
                 console=console,
                 spinner="dots",
                 spinner_style="cornflower_blue"
@@ -922,6 +1249,10 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
         from .llm.aiohttp_session_manager import close_managed_aiohttp_session
         await close_managed_aiohttp_session()
         
+        # Clean up event loop manager to prevent BaseEventLoop.__del__ errors
+        from .core.event_loop_manager import ensure_clean_shutdown
+        ensure_clean_shutdown()
+        
         # Additional cleanup
         import gc
         await asyncio.sleep(0.1)  # Give time for cleanup to complete
@@ -933,87 +1264,16 @@ async def _chat_loop(orchestrator: SongbirdOrchestrator, command_registry,
 
 
 
-
 @app.command()
 def version() -> None:
-    """Show Songbird version information."""
-    show_banner()
-    console.print(f"\nSongbird v{__version__}", style="bold cyan")
-    console.print("Terminal-first AI coding companion", style="dim")
+    from .version import show_version
+    show_version()
 
 
 @app.command()
 def help() -> None:
-    """Show comprehensive help information."""
     display_enhanced_help(console)
 
-
-@app.command()
-def status() -> None:
-    """Show system status and provider information."""
-    enhanced_cli.display_startup_banner()
-
-
-@app.command()
-def performance(
-    enable: bool = typer.Option(False, "--enable", help="Enable performance monitoring"),
-    report: bool = typer.Option(False, "--report", help="Show performance report"),
-    clear: bool = typer.Option(False, "--clear", help="Clear performance data")
-) -> None:
-    """Performance monitoring and optimization commands."""
-    from .performance import enable_profiling, disable_profiling, get_profiler, clear_profiling, OptimizationSuggestions
-    
-    if enable:
-        enable_profiling()
-        enhanced_cli.display_success_message("Performance monitoring enabled")
-        return
-    
-    if clear:
-        clear_profiling()
-        enhanced_cli.display_success_message("Performance data cleared")
-        return
-    
-    if report:
-        profiler = get_profiler()
-        report = profiler.generate_report()
-        
-        if report.operations_count == 0:
-            console.print("[yellow]No performance data available. Enable monitoring with --enable first.[/yellow]")
-            return
-        
-        # Display performance report
-        console.print("\n[bold]Performance Report:[/bold]")
-        console.print(f"Operations: {report.operations_count}")
-        console.print(f"Total time: {report.total_duration:.2f}s")
-        console.print(f"Average time: {report.avg_duration:.3f}s")
-        console.print(f"Memory peak: {report.memory_peak:.1f}MB")
-        
-        # Show slowest operations
-        slowest = report.get_slowest_operations(3)
-        if slowest:
-            console.print("\n[bold]Slowest Operations:[/bold]")
-            for i, op in enumerate(slowest, 1):
-                console.print(f"{i}. {op.operation}: {op.duration:.3f}s")
-        
-        # Show optimization suggestions
-        suggestions = OptimizationSuggestions.analyze_report(report)
-        if suggestions:
-            console.print("\n[bold]Optimization Suggestions:[/bold]")
-            for suggestion in suggestions[:5]:
-                console.print(f"💡 {suggestion}")
-        
-        return
-    
-    # Default: show performance status
-    profiler = get_profiler()
-    if profiler.enabled:
-        console.print("[green]Performance monitoring is enabled[/green]")
-        report = profiler.generate_report()
-        if report.operations_count > 0:
-            console.print(f"Current session: {report.operations_count} operations, {report.total_duration:.2f}s total")
-    else:
-        console.print("[yellow]Performance monitoring is disabled[/yellow]")
-        console.print("Use 'songbird performance --enable' to start monitoring")
 
 
 if __name__ == "__main__":

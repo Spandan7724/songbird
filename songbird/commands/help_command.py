@@ -1,8 +1,3 @@
-# songbird/commands/help_command.py
-"""
-Help command for displaying available commands and usage information.
-"""
-
 from typing import Dict, Any
 from rich.table import Table
 from rich.panel import Panel
@@ -11,7 +6,6 @@ from .registry import CommandRegistry
 
 
 class HelpCommand(BaseCommand):
-    """Command to display help information."""
     
     def __init__(self, registry: CommandRegistry):
         super().__init__(
@@ -22,19 +16,15 @@ class HelpCommand(BaseCommand):
         self.registry = registry
     
     async def execute(self, args: str, context: Dict[str, Any]) -> CommandResult:
-        """Execute the help command."""
         if args.strip():
-            # Show help for specific command
             return self._show_command_help(args.strip())
         else:
             # Show general help
             return self._show_general_help()
     
     def _show_general_help(self) -> CommandResult:
-        """Show general help with all available commands."""
         commands = self.registry.get_all_commands()
         
-        # Create help table
         table = Table(title="Available Commands", show_header=True, header_style="bold blue")
         table.add_column("Command", style="cornflower_blue", width=15)
         table.add_column("Aliases", style="dim", width=10)
@@ -48,7 +38,6 @@ class HelpCommand(BaseCommand):
                 command.description
             )
         
-        # Create usage information
         usage_text = """
 [bold]Usage:[/bold]
 • Type [cornflower_blue]/[/cornflower_blue] to show commands
@@ -74,8 +63,6 @@ class HelpCommand(BaseCommand):
         )
     
     def _show_command_help(self, command_name: str) -> CommandResult:
-        """Show help for a specific command."""
-        # Remove leading slash if present
         if command_name.startswith('/'):
             command_name = command_name[1:]
         
@@ -86,7 +73,6 @@ class HelpCommand(BaseCommand):
                 message=f"Command '{command_name}' not found. Use '/help' to see all commands."
             )
         
-        # Create detailed help for the command
         help_text = f"""
 [bold]Command:[/bold] /{command.name}
 [bold]Aliases:[/bold] {', '.join('/' + alias for alias in command.aliases) if command.aliases else 'None'}

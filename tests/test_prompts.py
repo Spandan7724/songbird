@@ -1,6 +1,5 @@
 """Tests for the unified prompts system."""
 
-import pytest
 from pathlib import Path
 
 from songbird.prompts import (

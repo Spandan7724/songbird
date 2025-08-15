@@ -1,8 +1,4 @@
-# songbird/agent/plan_manager.py
-"""Plan generation and management for agentic workflows."""
-
 import json
-import uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
@@ -19,21 +15,30 @@ class PlanManager:
     async def generate_plan_prompt(self, user_request: str, context: Dict[str, Any]) -> str:
         """Generate a prompt for the LLM to create an execution plan."""
         
-        # Determine if this requires planning
-        complexity_indicators = [
-            "create", "build", "implement", "setup", "configure", "install",
-            "multiple", "several", "all", "entire", "complete", "full",
-            "project", "application", "system", "feature", "module"
+
+        planning_indicators = [
+            # File operations
+            "create", "build", "make", "generate", "write", "add", "implement",
+            # Multi-step words
+            "multiple", "several", "all", "entire", "complete", "full", "and",
+            "project", "application", "system", "feature", "module", "setup", "configure", "install",
+            "three", "four", "five", "2", "3", "4", "5", "two", "both"
         ]
         
         request_lower = user_request.lower()
-        is_complex = any(indicator in request_lower for indicator in complexity_indicators)
+        has_planning_indicator = any(indicator in request_lower for indicator in planning_indicators)
+
+        should_plan = (
+            has_planning_indicator or  # Contains planning keywords
+            len(user_request.split()) >= 8 or  # Reasonably long request
+            " and " in request_lower or  # Multiple actions connected by "and"
+            request_lower.count(",") >= 1  # Multiple items separated by commas
+        )
         
-        if not is_complex and len(user_request.split()) < 10:
-            # Simple request - no planning needed
+        if not should_plan:
             return ""
         
-        # Generate planning prompt for complex requests using centralized template
+        # Generate planning prompt for multi-step requests using centralized template
         from ..prompts import get_planning_prompt_template
         plan_prompt_template = get_planning_prompt_template()
         plan_prompt = plan_prompt_template.format(user_request=user_request)
@@ -50,7 +55,6 @@ class PlanManager:
                 lines = response_clean.split("\n")
                 response_clean = "\n".join(lines[1:-1])
             
-            # Parse JSON
             plan_data = json.loads(response_clean)
             
             # Validate required fields
@@ -80,25 +84,22 @@ class PlanManager:
             
             return plan
             
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError):
             # Plan parsing failed - return None to fall back to direct execution
             return None
     
     def set_current_plan(self, plan: AgentPlan) -> None:
-        """Set the current active plan."""
         if self.current_plan:
             self.plan_history.append(self.current_plan)
         self.current_plan = plan
         plan.status = PlanStatus.IN_PROGRESS
     
     def get_next_step(self) -> Optional[PlanStep]:
-        """Get the next step to execute from the current plan."""
         if not self.current_plan:
             return None
         return self.current_plan.get_next_step()
     
     def mark_step_completed(self, step_id: str, result: Dict[str, Any]) -> None:
-        """Mark a step as completed with its result."""
         if not self.current_plan:
             return
             
@@ -115,7 +116,6 @@ class PlanManager:
             self.current_plan.status = PlanStatus.COMPLETED
     
     def mark_step_failed(self, step_id: str, error: str) -> None:
-        """Mark a step as failed with error details."""
         if not self.current_plan:
             return
             
@@ -128,7 +128,6 @@ class PlanManager:
         self.current_plan.updated_at = datetime.now().isoformat()
     
     def update_plan(self, updates: Dict[str, Any]) -> None:
-        """Update the current plan with new information."""
         if not self.current_plan:
             return
         
@@ -155,38 +154,32 @@ class PlanManager:
         self.current_plan.updated_at = datetime.now().isoformat()
     
     def get_plan_progress(self) -> Optional[Dict[str, Any]]:
-        """Get progress information for the current plan."""
         if not self.current_plan:
             return None
         return self.current_plan.get_progress()
     
     def is_plan_complete(self) -> bool:
-        """Check if the current plan is complete."""
         if not self.current_plan:
-            return True  # No plan means no work to do
+            return True
         return self.current_plan.is_complete()
     
     def has_plan_failed(self) -> bool:
-        """Check if the current plan has failed."""
         if not self.current_plan:
             return False
         return self.current_plan.has_failed()
     
     def clear_current_plan(self) -> None:
-        """Clear the current plan."""
         if self.current_plan:
             self.plan_history.append(self.current_plan)
         self.current_plan = None
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert plan manager state to dictionary."""
         return {
             "current_plan": self.current_plan.to_dict() if self.current_plan else None,
             "plan_history": [plan.to_dict() for plan in self.plan_history]
         }
     
     def from_dict(self, data: Dict[str, Any]) -> None:
-        """Restore plan manager state from dictionary."""
         if data.get("current_plan"):
             self.current_plan = AgentPlan.from_dict(data["current_plan"])
         

@@ -3,17 +3,13 @@
 MultiEdit tool for atomic multi-file editing operations.
 
 """
-import asyncio
-import json
 import os
 import tempfile
 import shutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
-from rich.text import Text
 from rich.syntax import Syntax
 import difflib
 
@@ -125,7 +121,7 @@ async def _prepare_edit(edit: Dict[str, Any], index: int) -> Dict[str, Any]:
     
     # Required fields
     if "file_path" not in edit:
-        raise ValueError(f"Missing required field 'file_path'")
+        raise ValueError("Missing required field 'file_path'")
     
     file_path = Path(edit["file_path"]).resolve()
     operation = edit.get("operation", "edit")
@@ -579,7 +575,6 @@ async def multi_edit_pattern(
         Dictionary with operation results
     """
     from .glob_tool import glob_pattern
-    from .grep_tool import grep_search
     
     # Find files matching patterns
     all_files = []
@@ -641,7 +636,6 @@ async def multi_edit_pattern(
     return await multi_edit(edits, preview_only=preview_only)
 
 
-import os
 async def multi_create_from_template(
     template_path: str,
     target_files: List[Dict[str, Any]],

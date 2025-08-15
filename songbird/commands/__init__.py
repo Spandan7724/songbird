@@ -1,4 +1,3 @@
-# songbird/commands/__init__.py
 """
 Command system for dynamic in-chat commands (e.g., /model, /help, /clear).
 """

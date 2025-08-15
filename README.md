@@ -11,15 +11,19 @@
 ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═╝╚═════╝
 </pre>
 
-**A terminal-first AI coding companion with 11 professional tools, smart task management, and persistent memory**
+**A terminal-based AI coding companion with 11 professional tools, smart task management, and persistent memory**
 
 [![CI](https://github.com/Spandan7724/songbird/workflows/CI/badge.svg)](https://github.com/Spandan7724/songbird/actions/workflows/ci.yml)
 [![PyPI version](https://badge.fury.io/py/songbird-ai.svg)](https://badge.fury.io/py/songbird-ai)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://img.shields.io/pypi/v/songbird-ai)](https://pypi.org/project/songbird-ai/)
+
 
 </div>
+
+![Songbird Demo](media/songbird.gif)
+
+
 
 
 ## Downloading
@@ -57,6 +61,9 @@ export GEMINI_API_KEY="your-api-key-here"
 # Start coding with AI
 songbird
 
+# Set your default provider (one-time setup)
+songbird --default
+
 # Continue your previous session
 songbird --continue
 
@@ -80,6 +87,9 @@ export COPILOT_ACCESS_TOKEN="your-copilot-token-here"
 # Start coding with GitHub Copilot
 songbird --provider copilot
 
+# Set Copilot as your default (one-time setup)
+songbird default copilot
+
 # Continue previous session with Copilot
 songbird --provider copilot --continue
 ```
@@ -99,6 +109,9 @@ ollama pull devstral:latest
 
 # Start coding with AI
 songbird --provider ollama
+
+# Set Ollama as your default (one-time setup)  
+songbird default ollama
 
 # Continue previous session with Ollama
 songbird --provider ollama --continue
@@ -293,9 +306,28 @@ songbird --provider ollama
 # List available providers
 songbird --list-providers
 
+# Set default provider (no need to specify --provider every time)
+songbird --default               # Interactive menu to set defaults
+songbird default gemini          # Set Gemini as default provider
+songbird default copilot gpt-4o  # Set Copilot with specific model
+songbird default ollama qwen2.5-coder:7b  # Set Ollama with specific model
+
+# After setting defaults, just use:
+songbird                 # Uses your configured defaults
+
 # Session management
-songbird --continue    # Continue latest session
-songbird --resume      # Pick from previous sessions
+songbird --continue      # Continue latest session
+songbird --resume        # Pick from previous sessions
+
+# Print mode - One-off commands with clean output
+songbird -p "What is 2+2?"                    # Shows tool execution + answer
+songbird -p "Create a Python hello world"     # Transparent mode (default)
+songbird -p "List files in current directory" # Shows tools used
+
+# Ultra-quiet mode - Final answer only (perfect for scripting)
+songbird -p "What is 2+2?" --quiet           # Only shows: "4"
+songbird -p "Create hello.py" --quiet         # Only shows: "File created successfully..."
+songbird -p "Current time" --quiet            # Clean output for automation
 
 # Show available commands
 songbird --help
@@ -322,6 +354,61 @@ Once in a conversation, use these powerful commands:
 # Session management
 /clear                    # Clear conversation history
 /clear --force            # Clear without confirmation
+```
+
+## Configuration
+
+### Default Provider & Model Setup
+
+Songbird lets you set default providers and models so you don't have to specify them every time:
+
+```bash
+# Interactive setup - shows menu to choose provider and model
+songbird --default
+
+# Direct setup - set provider only (uses provider's default model)
+songbird default gemini
+songbird default copilot  
+songbird default ollama
+
+# Direct setup - set both provider and specific model
+songbird default openai gpt-4o-mini
+songbird default claude claude-3-5-sonnet-20241022
+songbird default gemini gemini-2.0-flash-001
+songbird default ollama qwen2.5-coder:7b
+songbird default copilot gpt-4.1-2025-04-14
+
+# After setting defaults, simply run:
+songbird  # Uses your configured provider and model
+```
+
+### Configuration File
+
+Songbird stores your preferences in `~/.songbird/config.json`:
+
+```json
+{
+  "llm": {
+    "default_provider": "gemini",
+    "default_models": {
+      "openai": "gpt-4o",
+      "claude": "claude-3-5-sonnet-20241022", 
+      "gemini": "gemini-2.0-flash-001",
+      "ollama": "qwen2.5-coder:7b",
+      "copilot": "gpt-4.1-2025-04-14"
+    }
+  }
+}
+```
+
+### Environment Variable Overrides
+
+You can override any configuration with environment variables:
+
+```bash
+export SONGBIRD_DEFAULT_PROVIDER="gemini"
+export SONGBIRD_MAX_TOKENS=8192
+export SONGBIRD_TEMPERATURE=0.3
 ```
 
 
@@ -375,25 +462,6 @@ python -m build
 # Test local installation
 uv tool install ./dist/songbird_ai-*.whl
 ```
-
-##  Roadmap
-
-Songbird follows a **test-driven, phase-based development** approach:
-
-- [x] **Phase 1**: LLM Provider Layer (OpenAI, Claude, Gemini, GitHub Copilot, Ollama, OpenRouter)
-- [x] **Phase 2**: File Search (enhanced with type filtering and smart detection)
-- [x] **Phase 3**: Patch Generation & Apply (with beautiful diff previews)
-- [x] **Phase 4**: Shell Execution (live streaming and cross-platform)
-- [x] **Phase 5**: Conversation Orchestrator (multi-turn with tool calling)
-- [x] **Phase 6**: Advanced UI/UX (interactive menus and rich displays)
-- [x] **Phase 7**: Session Memory (complete with project-aware storage)
-- [x] **Phase 8**: Dynamic Command System (in-chat model switching)
-- [x] **Phase 9**: Feature Parity (11 professional tools, task management)
-- [ ] **Phase 10**: MCP Server Protocol
-- [ ] **Phase 11**: Advanced Safety & Permissions
-- [ ] **Phase 12**: Plugin System
-
-
 
 
 

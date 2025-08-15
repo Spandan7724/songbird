@@ -1,6 +1,3 @@
-# songbird/core/__init__.py
-"""Core infrastructure components for Songbird."""
-
 from .signal_handler import (
     GracefulShutdownHandler,
     SessionAwareShutdownHandler,

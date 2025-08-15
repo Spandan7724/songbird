@@ -1,5 +1,5 @@
 """Session memory system for Songbird."""
-from .manager import SessionManager
+from .optimized_manager import OptimizedSessionManager
 from .models import Session, Message
 
-__all__ = ["SessionManager", "Session", "Message"]
+__all__ = ["OptimizedSessionManager", "Session", "Message"]

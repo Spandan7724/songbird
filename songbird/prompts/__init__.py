@@ -60,22 +60,18 @@ class PromptManager:
         return prompts
     
     def get_core_system_prompt(self) -> str:
-        """Get the core agent system prompt."""
         prompts = self._load_prompts()
         return prompts.get('core_agent_system_prompt', self._get_fallback_system_prompt())
     
     def get_planning_prompt_template(self) -> str:
-        """Get the planning generation prompt template."""
         prompts = self._load_prompts()
         return prompts.get('planning_generation_prompt_template', self._get_fallback_planning_prompt())
     
     def get_todo_completion_prompt_template(self) -> str:
-        """Get the todo auto-completion prompt template."""
         prompts = self._load_prompts()
         return prompts.get('todo_auto_completion_prompt_template', self._get_fallback_todo_prompt())
     
     def _get_fallback_system_prompt(self) -> str:
-        """Fallback system prompt if file loading fails."""
         return """You are Songbird, an AI coding assistant with access to powerful tools.
 
 CORE PRINCIPLES:
@@ -110,7 +106,6 @@ Create a step-by-step execution plan in JSON format with the following structure
 Please respond with ONLY the JSON plan."""
     
     def _get_fallback_todo_prompt(self) -> str:
-        """Fallback todo completion prompt template."""
         return """Analyze this user message: "{message}"
 
 Current todos: {todos_json}
@@ -118,7 +113,6 @@ Current todos: {todos_json}
 Return ONLY a JSON array of completed todo IDs: ["id1", "id2"]"""
     
     def reload_prompts(self) -> None:
-        """Force reload prompts from file."""
         self._prompts_cache = None
 
 
@@ -127,17 +121,13 @@ _prompt_manager = PromptManager()
 
 # Convenience functions
 def get_core_system_prompt() -> str:
-    """Get the core agent system prompt."""
     return _prompt_manager.get_core_system_prompt()
 
 def get_planning_prompt_template() -> str:
-    """Get the planning generation prompt template."""
     return _prompt_manager.get_planning_prompt_template()
 
 def get_todo_completion_prompt_template() -> str:
-    """Get the todo auto-completion prompt template."""
     return _prompt_manager.get_todo_completion_prompt_template()
 
 def reload_prompts() -> None:
-    """Force reload prompts from file."""
     _prompt_manager.reload_prompts()

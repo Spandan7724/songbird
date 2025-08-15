@@ -1,4 +1,4 @@
-# songbird/commands/clear_command.py
+
 """
 Clear command for clearing the current conversation history.
 """
@@ -9,7 +9,6 @@ from .base import BaseCommand, CommandResult
 
 
 class ClearCommand(BaseCommand):
-    """Command to clear the current conversation history."""
     
     def __init__(self):
         super().__init__(
@@ -19,12 +18,9 @@ class ClearCommand(BaseCommand):
         )
     
     async def execute(self, args: str, context: Dict[str, Any]) -> CommandResult:
-        """Execute the clear command."""
-        # Check if we should skip confirmation (for args like --force or -f)
         force = args.strip().lower() in ['--force', '-f', 'force', 'f']
         
         if not force:
-            # Ask for confirmation
             confirm = Confirm.ask("\n[white]Clear current conversation history? [cyan]\\[y/n][/cyan][/white]", show_choices=False)
             if not confirm:
                 return CommandResult(
@@ -32,10 +28,8 @@ class ClearCommand(BaseCommand):
                     message="[cornflower_blue]Clear cancelled[/cornflower_blue]"
                 )
         
-        # Clear the screen
         self.console.clear()
         
-        # Show a fresh banner or indication
         self.console.print("[cornflower_blue]Conversation cleared![/cornflower_blue]")
         self.console.print("[dim]Starting fresh conversation...[dim]\n")
         

@@ -1,8 +1,7 @@
 """LLM provider registry and unified LiteLLM interface."""
 from abc import ABC, abstractmethod
-from typing import Dict, Type, List, Any, Optional
+from typing import Dict, List, Any, Optional
 import os
-import logging
 from rich.console import Console
 
 from .types import ChatResponse
@@ -19,11 +18,9 @@ console = Console()
 
 
 class BaseProvider(ABC):
-    """Base class for all LLM providers."""
     
     @abstractmethod
     def chat(self, message: str, tools: Optional[List[Dict[str, Any]]] = None) -> ChatResponse:
-        """Send a chat message and return the response."""
         pass
     
     @abstractmethod
@@ -34,7 +31,6 @@ class BaseProvider(ABC):
 
 # LiteLLM unified provider functions
 def create_litellm_provider(provider_name: str, model: str = None, api_base: str = None, **kwargs):
-    """Create a LiteLLM provider instance."""
     if not LITELLM_AVAILABLE:
         raise ImportError("LiteLLM is not installed. Install with: pip install litellm")
     
@@ -60,56 +56,78 @@ def create_litellm_provider(provider_name: str, model: str = None, api_base: str
     return adapter
 
 
-def get_copilot_provider(model: str = None, **kwargs):
-    """Create a custom GitHub Copilot provider instance."""
+def get_copilot_provider(model: str = None, quiet: bool = False, **kwargs):
     if not model:
         model = "gpt-4o"  # Default model for Copilot
     
     try:
         provider = CopilotProvider(model=model, **kwargs)
-        console.print(f"✓ COPILOT_ACCESS_TOKEN configured: {os.getenv('COPILOT_ACCESS_TOKEN', 'Not set')[:10]}...{os.getenv('COPILOT_ACCESS_TOKEN', '')[-4:] if os.getenv('COPILOT_ACCESS_TOKEN') else ''}")
-        console.print(f"GitHub Copilot provider initialized: {model}")
+        if not quiet:
+            console.print(f"[dim]✓ COPILOT_ACCESS_TOKEN configured: {os.getenv('COPILOT_ACCESS_TOKEN', 'Not set')[:10]}...{os.getenv('COPILOT_ACCESS_TOKEN', '')[-4:] if os.getenv('COPILOT_ACCESS_TOKEN') else ''}[/dim]")
         return provider
     except Exception as e:
-        console.print(f"[red]Failed to initialize GitHub Copilot provider: {e}[/red]")
+        if not quiet:
+            console.print(f"[red]Failed to initialize GitHub Copilot provider: {e}[/red]")
         raise e
 
 
 def get_litellm_provider(provider_name: str, model: str = None, api_base: str = None, **kwargs):
-    """Get a LiteLLM provider with special handling for Copilot and fallback to legacy providers."""
     # Special handling for GitHub Copilot
     if provider_name == "copilot":
         return get_copilot_provider(model, **kwargs)
     
-    try:
-        if LITELLM_AVAILABLE:
-            return create_litellm_provider(provider_name, model, api_base, **kwargs)
-        else:
-            console.print(f"[yellow]LiteLLM not available, falling back to legacy provider[/yellow]")
-            return get_legacy_provider(provider_name, model, **kwargs)
-    except Exception as e:
-        console.print(f"[yellow]LiteLLM provider creation failed: {e}[/yellow]")
-        return get_legacy_provider(provider_name, model, **kwargs)
-
-
-def get_legacy_provider(provider_name: str, model: str = None, **kwargs):
-    """Get a legacy provider (deprecated - will be removed)."""
-    console.print(f"[red]WARNING: Legacy providers are deprecated and will be removed.[/red]")
-    console.print(f"[yellow]Please use --litellm flag for {provider_name} provider.[/yellow]")
+    if not LITELLM_AVAILABLE:
+        raise ImportError("LiteLLM is required but not installed. Install with: pip install litellm")
     
-    # For now, return None to force LiteLLM usage
-    raise ValueError(f"Legacy provider '{provider_name}' is no longer supported. Use --litellm flag.")
+    return create_litellm_provider(provider_name, model, api_base, **kwargs)
+
+
+
 
 
 def get_provider(name: str, use_litellm: bool = True) -> BaseProvider:
-    """Get a provider instance by name."""
-    # Always use LiteLLM since legacy providers have been removed
     return get_litellm_provider(name)
 
 
 def get_default_provider_name():
-    """Get the default provider name based on available API keys and configuration."""
-    # Priority order for auto-selection
+    try:
+        from ..config.config_manager import get_config_manager
+        
+        # Get configured default provider
+        config_manager = get_config_manager()
+        config = config_manager.get_config()
+        configured_default = config.llm.default_provider
+        
+        # Check if configured default is available (has API key/service)
+        if configured_default:
+            api_key_map = {
+                "gemini": "GEMINI_API_KEY",
+                "claude": "ANTHROPIC_API_KEY", 
+                "openai": "OPENAI_API_KEY",
+                "copilot": "COPILOT_ACCESS_TOKEN",
+                "openrouter": "OPENROUTER_API_KEY",
+                "ollama": None  # No API key needed
+            }
+            
+            required_key = api_key_map.get(configured_default)
+            if required_key is None or os.getenv(required_key):
+                # For ollama, also check if service is running
+                if configured_default == "ollama":
+                    try:
+                        import requests
+                        response = requests.get("http://localhost:11434/api/version", timeout=2)
+                        if response.status_code == 200:
+                            return configured_default
+                    except Exception:
+                        pass  # Ollama not running, fall back to priority logic
+                else:
+                    return configured_default
+    
+    except Exception:
+        # If config loading fails, fall back to original priority logic
+        pass
+    
+    # Fallback to original priority-based selection
     providers_priority = ["gemini", "claude", "openai", "copilot", "openrouter", "ollama"]
     
     for provider in providers_priority:
@@ -135,18 +153,15 @@ def get_default_provider_name():
 
 
 def get_default_provider():
-    """Get the default provider instance based on available API keys and configuration."""
     provider_name = get_default_provider_name()
     return get_litellm_provider(provider_name)
 
 
 def list_available_providers() -> List[str]:
-    """Get list of available provider names."""
     return ["openai", "claude", "gemini", "ollama", "openrouter"]
 
 
 def list_ready_providers() -> List[str]:
-    """Get list of providers that are ready to use (with API keys configured)."""
     ready_providers = []
     
     # Check each provider for API key availability
@@ -169,8 +184,7 @@ def list_ready_providers() -> List[str]:
     return ready_providers
 
 
-def get_provider_info(use_discovery: bool = True) -> Dict[str, Dict[str, Any]]:
-    """Get information about all available providers with dynamic model discovery."""
+def get_provider_info(use_discovery: bool = True, quiet: bool = False) -> Dict[str, Dict[str, Any]]:
     provider_info = {}
     
     # Static provider configuration
@@ -217,7 +231,8 @@ def get_provider_info(use_discovery: bool = True) -> Dict[str, Dict[str, Any]]:
                 try:
                     loop = asyncio.get_running_loop()
                     # We're in an event loop, skip discovery for now
-                    console.print("[dim]Skipping discovery (in event loop), using fallback models[/dim]")
+                    if not quiet:
+                        console.print("[dim]Skipping discovery (in event loop), using fallback models[/dim]")
                     discovered_models = {}
                 except RuntimeError:
                     # No event loop running, safe to create one
@@ -246,10 +261,12 @@ def get_provider_info(use_discovery: bool = True) -> Dict[str, Dict[str, Any]]:
         # Use discovered models if available, otherwise fall back to static list
         if name in discovered_models and discovered_models[name]:
             models = [model.id for model in discovered_models[name]]
-            console.print(f"[dim]Using {len(models)} discovered models for {name}[/dim]")
+            if not quiet:
+                console.print(f"[dim]Using {len(models)} discovered models for {name}[/dim]")
         else:
             models = info["fallback_models"]
-            console.print(f"[dim]Using {len(models)} fallback models for {name}[/dim]")
+            if not quiet:
+                console.print(f"[dim]Using {len(models)} fallback models for {name}[/dim]")
         
         provider_info[name] = {
             "available": True,
@@ -263,7 +280,6 @@ def get_provider_info(use_discovery: bool = True) -> Dict[str, Dict[str, Any]]:
 
 
 async def get_models_for_provider(provider_name: str, use_cache: bool = True) -> List[str]:
-    """Get available models for a specific provider using dynamic discovery."""
     try:
         from ..discovery import get_discovery_service
         

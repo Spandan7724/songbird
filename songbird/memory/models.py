@@ -1,6 +1,3 @@
-# Updated songbird/memory/models.py with provider configuration
-
-"""Data models for session memory."""
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -9,16 +6,15 @@ import uuid
 
 @dataclass
 class Message:
-    """Represents a single message in the conversation."""
-    role: str  # "user", "assistant", "system", "tool"
+    
+    role: str 
     content: str
     timestamp: datetime = field(default_factory=datetime.now)
     tool_calls: Optional[List[Dict[str, Any]]] = None
     tool_call_id: Optional[str] = None
-    name: Optional[str] = None  # For tool messages
+    name: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert message to dictionary for storage."""
         data = {
             "role": self.role,
             "content": self.content,
@@ -34,7 +30,6 @@ class Message:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Message":
-        """Create message from dictionary."""
         timestamp = datetime.fromisoformat(data["timestamp"])
         return cls(
             role=data["role"],
@@ -48,19 +43,17 @@ class Message:
 
 @dataclass
 class Session:
-    """Represents a chat session."""
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     messages: List[Message] = field(default_factory=list)
     summary: str = ""
     project_path: str = ""
-    # Add provider configuration
     provider_config: Dict[str, Any] = field(default_factory=dict)
-    schema_version: str = "1.0"  # Version for serialization compatibility
+    schema_version: str = "1.0"
+    referenced_files: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert session to dictionary for storage."""
         return {
             "id": self.id,
             "created_at": self.created_at.isoformat(),
@@ -68,13 +61,13 @@ class Session:
             "messages": [msg.to_dict() for msg in self.messages],
             "summary": self.summary,
             "project_path": self.project_path,
-            "provider_config": self.provider_config,  # Save provider config
-            "schema_version": self.schema_version  # Include schema version
+            "provider_config": self.provider_config,
+            "schema_version": self.schema_version,
+            "referenced_files": self.referenced_files
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Session":
-        """Create session from dictionary."""
         return cls(
             id=data["id"],
             created_at=datetime.fromisoformat(data["created_at"]),
@@ -83,30 +76,25 @@ class Session:
                       for msg in data.get("messages", [])],
             summary=data.get("summary", ""),
             project_path=data.get("project_path", ""),
-            # Load provider config
             provider_config=data.get("provider_config", {}),
-            schema_version=data.get("schema_version", "1.0")  # Default to 1.0 for compatibility
+            schema_version=data.get("schema_version", "1.0"),
+            referenced_files=data.get("referenced_files", {})
         )
 
     def add_message(self, message: Message):
-        """Add a message to the session."""
         self.messages.append(message)
         self.updated_at = datetime.now()
 
     def get_message_count(self) -> int:
-        """Get the number of messages in the session."""
         return len(self.messages)
 
     def generate_summary(self, max_words: int = 10) -> str:
-        """Generate a summary based on user messages."""
-        # Get first few user messages
         user_messages = [
             msg for msg in self.messages if msg.role == "user"][:3]
 
         if not user_messages:
             return "Empty session"
 
-        # Simple summary from first user message
         first_msg = user_messages[0].content
         words = first_msg.split()[:max_words]
         summary = " ".join(words)
@@ -117,41 +105,50 @@ class Session:
         return summary
 
     def update_provider_config(self, provider: str, model: str, provider_type: str = "legacy"):
-        """Update the provider configuration for this session."""
         self.provider_config = {
             "provider": provider,
             "model": model,
-            "provider_type": provider_type,  # "legacy" or "litellm"
+            "provider_type": provider_type,
             "updated_at": datetime.now().isoformat()
         }
         self.updated_at = datetime.now()
     
     def update_litellm_config(self, provider: str, model: str, litellm_model: str, api_base: Optional[str] = None):
-        """Update the provider configuration for LiteLLM usage."""
         self.provider_config = {
             "provider": provider,
             "model": model,
             "provider_type": "litellm",
-            "litellm_model": litellm_model,  # The full LiteLLM model string like "openai/gpt-4o"
+            "litellm_model": litellm_model,
             "api_base": api_base,
             "updated_at": datetime.now().isoformat()
         }
         self.updated_at = datetime.now()
     
     def get_provider_type(self) -> str:
-        """Get the provider type (legacy or litellm)."""
         return self.provider_config.get("provider_type", "legacy")
     
     def get_litellm_model(self) -> Optional[str]:
-        """Get the LiteLLM model string if using LiteLLM."""
         if self.get_provider_type() == "litellm":
             return self.provider_config.get("litellm_model")
         return None
     
     def get_api_base(self) -> Optional[str]:
-        """Get the API base URL if specified."""
         return self.provider_config.get("api_base")
     
     def is_litellm_session(self) -> bool:
-        """Check if this session is using LiteLLM."""
         return self.get_provider_type() == "litellm"
+    
+    def add_referenced_file(self, file_path: str, metadata: Dict[str, Any] = None):
+        self.referenced_files[file_path] = {
+            "first_referenced": datetime.now().isoformat(),
+            "last_referenced": datetime.now().isoformat(),
+            "reference_count": self.referenced_files.get(file_path, {}).get("reference_count", 0) + 1,
+            "metadata": metadata or {}
+        }
+        self.updated_at = datetime.now()
+    
+    def get_referenced_files(self) -> List[str]:
+        return list(self.referenced_files.keys())
+    
+    def get_file_reference_info(self, file_path: str) -> Optional[Dict[str, Any]]:
+        return self.referenced_files.get(file_path)
